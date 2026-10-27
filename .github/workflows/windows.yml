@@ -1,0 +1,54 @@
+# Builds RealBook for Windows, checks that it reads and speaks, and attaches it to releases.
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # to attach the build to a release
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Self-test from source (import a book, speak with a Windows voice)
+        run: uv run realbook-selftest
+
+      - name: Build
+        run: uv run pyinstaller --noconfirm --clean --distpath dist --workpath build packaging/RealBook.spec
+
+      - name: Self-test the built app (Windows voice and Kokoro)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/RealBook/RealBook.exe -ArgumentList '--selftest','--kokoro','--log','selftest.log' -Wait -PassThru
+          Get-Content selftest.log
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/RealBook -DestinationPath RealBook-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealBook-windows
+          path: RealBook-windows.zip
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" RealBook-windows.zip --clobber

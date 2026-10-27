@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RealBook: books read aloud by their characters</title>
+  <meta name="description" content="RealBook reads your books aloud with a different, fitting voice for every character, designed from how the book describes them. Free and offline on Mac and Windows.">
+  <link rel="icon" href="images/icon.png">
+  <style>
+    :root {
+      --bg: #fbfaf7; --ink: #1d1d1f; --muted: #6e6e73; --line: rgba(0, 0, 0, .09); --card: #ffffff;
+      --accent: #e8590c; --accent-ink: #fff; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 40px rgba(0,0,0,.10);
+      --serif: ui-serif, "New York", "Iowan Old Style", Georgia, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #141414; --ink: #f2f2f4; --muted: #a1a1a6; --line: rgba(255,255,255,.1); --card: #1e1e1f; --accent: #ff8a3d; --accent-ink: #1d1d1f; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 40px rgba(0,0,0,.5); }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    header.top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--ink); text-decoration: none; }
+    .brand img { width: 34px; height: 34px; border-radius: 8px; }
+    nav a { color: var(--muted); text-decoration: none; margin-left: 22px; font-size: 15px; }
+    nav a:hover { color: var(--ink); }
+    .hero { text-align: center; padding: 48px 0 28px; }
+    .hero h1 { font: 700 clamp(36px, 6vw, 62px)/1.05 var(--serif); letter-spacing: -.02em; margin: 0 0 18px; }
+    .hero p { font-size: clamp(18px, 2.2vw, 21px); color: var(--muted); max-width: 680px; margin: 0 auto 30px; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+    .btn { display: inline-flex; flex-direction: column; align-items: center; padding: 12px 22px; border-radius: 12px; text-decoration: none; font-weight: 650; background: var(--accent); color: var(--accent-ink); min-width: 210px; }
+    .btn small { font-weight: 450; opacity: .8; font-size: 13px; }
+    .btn.secondary { background: var(--card); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+    .note { font-size: 14px; color: var(--muted); margin-top: 14px; }
+    .shot { margin: 40px auto 0; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); max-width: 1000px; }
+    .shot img { display: block; width: 100%; height: auto; }
+    section { padding: 64px 0 8px; }
+    h2 { font: 700 clamp(28px, 4vw, 38px)/1.15 var(--serif); margin: 0 0 14px; letter-spacing: -.01em; }
+    .lead { color: var(--muted); max-width: 700px; margin: 0 0 30px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+    .card { background: var(--card); border-radius: 14px; padding: 22px; box-shadow: inset 0 0 0 1px var(--line); }
+    .card h3 { margin: 0 0 6px; font-size: 18px; }
+    .card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+    .split { display: grid; grid-template-columns: 1.4fr 1fr; gap: 40px; align-items: center; }
+    .split.flip { grid-template-columns: 1fr 1.4fr; }
+    .split img { width: 100%; height: auto; border-radius: 14px; box-shadow: var(--shadow); display: block; }
+    .phone img { max-width: 300px; margin: 0 auto; border-radius: 28px; }
+    ol, ul { padding-left: 1.2em; } li { margin: 6px 0; }
+    code { font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--card); padding: 2px 6px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--line); }
+    table { width: 100%; border-collapse: collapse; font-size: 15.5px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-weight: 650; }
+    td:first-child { font-weight: 600; white-space: nowrap; }
+    footer { padding: 60px 0 40px; color: var(--muted); font-size: 14px; text-align: center; }
+    @media (max-width: 760px) {
+      .split, .split.flip { grid-template-columns: 1fr; gap: 22px; }
+      .split.flip > :first-child { order: 2; }
+      nav a { margin-left: 14px; }
+      nav a.hide-sm { display: none; }
+      td:first-child { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="#"><img src="images/icon.png" alt="">RealBook</a>
+      <nav>
+        <a href="#voices">Voices</a>
+        <a href="#devices" class="hide-sm">Devices</a>
+        <a href="#download">Download</a>
+        <a href="https://github.com/stanislav16/realbook">GitHub</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <h1>Your books, read aloud<br>by their characters.</h1>
+      <p>RealBook gives every character in a book their own voice, fitted to how the book describes them: the old Scottish lighthouse keeper sounds old and Scottish, the nine-year-old sounds nine. Free, and it runs entirely on your computer.</p>
+      <div class="buttons">
+        <a class="btn" href="https://github.com/stanislav16/realbook/releases/latest/download/RealBook.dmg">Download for Mac<small>Apple silicon · macOS 14 or later</small></a>
+        <a class="btn secondary" href="https://github.com/stanislav16/realbook/releases/latest/download/RealBook-windows.zip">Download for Windows<small>Windows 10 or 11, 64-bit</small></a>
+      </div>
+      <p class="note">Open source (GPL-3.0). No account, no subscription. Works with DRM-free EPUB and text files.</p>
+      <div class="shot"><img src="images/reader.png" alt="RealBook reading a book, with each character's lines in their own colour and the cast of voices beside it"></div>
+    </div>
+
+    <section id="voices">
+      <h2>A cast, not a narrator</h2>
+      <p class="lead">When you add a book, RealBook finds who is speaking each line of dialogue and what the book says about them, then casts a voice for each of them.</p>
+      <div class="grid">
+        <div class="card"><h3>Voices designed from the book</h3><p>With designed voices (Qwen3-TTS), each character's voice is made from a written description: “An old man in his seventies with a deep, low voice and a Scottish accent.” Rewrite any description and hear the change.</p></div>
+        <div class="card"><h3>Natural voices, offline</h3><p>Kokoro's natural-sounding voices run on your own computer, about four times faster than real time. Nothing is uploaded.</p></div>
+        <div class="card"><h3>Knows who's talking</h3><p>A built-in analyzer attributes dialogue to characters for free. Optionally, Claude can read the book for even more accurate casting.</p></div>
+        <div class="card"><h3>A reader you'll enjoy</h3><p>Themes, fonts and sizes like Apple Books, a table of contents that follows the book's own, and each speaker's lines in their colour.</p></div>
+      </div>
+    </section>
+
+    <section id="devices">
+      <div class="split flip">
+        <div class="phone"><img src="images/phone.png" alt="RealBook on a phone screen"></div>
+        <div>
+          <h2>On your phone too</h2>
+          <p class="lead">Turn on <b>Listen on Other Devices</b> and scan the QR code: your phone, tablet or another computer on the same Wi‑Fi gets your whole library, with your place kept in sync. The voices are made on your Mac, so even the large models work.</p>
+          <p class="lead">Going out? <b>Export Audiobook</b> turns a book into an .m4b with chapters, cover and every character's voice, ready for Apple Books, BookPlayer, Smart AudioBook Player or VLC, offline.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="split">
+        <div><img src="images/finder.png" alt="The Find Voice Models window listing speech models from Hugging Face"></div>
+        <div>
+          <h2>Keep up with new voices</h2>
+          <p class="lead">Open speech models improve every month. <b>Find Voice Models</b> lists what's trending on Hugging Face and highlights what matters: voice design, whether it runs on a Mac, and its licence.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="download">
+      <h2>Download and install</h2>
+      <table>
+        <tr><th>Computer</th><th>What you get</th><th>First launch</th></tr>
+        <tr><td>Mac with Apple silicon, macOS 14+</td><td>Mac voices, Kokoro, listening on your phone and audiobook export. Designed voices (Qwen3-TTS) need macOS 26 or later.</td><td>Open <code>RealBook.dmg</code> and drag RealBook to Applications. The app isn't notarized yet: the first time, macOS will refuse to open it; go to System Settings → Privacy &amp; Security and click <b>Open Anyway</b>.</td></tr>
+        <tr><td>Windows 10 or 11</td><td>Windows voices, Kokoro, listening on your phone. Designed voices and audiobook export are Mac-only for now.</td><td>Unzip <code>RealBook-windows.zip</code> and run <code>RealBook.exe</code>. SmartScreen may warn about an unknown publisher: click <b>More info → Run anyway</b>.</td></tr>
+      </table>
+      <p class="note">Voice models are downloaded from inside the app the first time you choose them: Kokoro is 354 MB, designed voices 6.3 GB.</p>
+    </section>
+
+    <section>
+      <h2>Good to know</h2>
+      <ul>
+        <li><b>Your books stay yours.</b> RealBook reads DRM-free EPUB and text files. It can't open books bought from stores that use copy protection, such as the Apple Books store.</li>
+        <li><b>How fast is it?</b> On an M5 MacBook Pro, Kokoro makes speech about 4× faster than real time and designed voices about 2× faster, so playback never waits after the first line.</li>
+        <li><b>Build it yourself:</b> the source, build steps and how it works are in the <a href="https://github.com/stanislav16/realbook#readme">README</a>.</li>
+      </ul>
+    </section>
+
+    <footer>
+      RealBook is free software under the GPL-3.0. Voices by <a href="https://huggingface.co/hexgrad/Kokoro-82M">Kokoro</a> and <a href="https://github.com/QwenLM/Qwen3-TTS">Qwen3-TTS</a> (Apache 2.0).<br>
+      <a href="https://github.com/stanislav16/realbook">Source on GitHub</a>
+    </footer>
+  </div>
+</body>
+</html>

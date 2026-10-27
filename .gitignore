@@ -1,0 +1,11 @@
+.venv/
+data/
+__pycache__/
+*.pyc
+build/
+dist/
+packaging/icon_1024.png
+voice-test/
+.DS_Store
+.claude/
+*.m4b

@@ -1,0 +1,104 @@
+# RealBook
+
+Reads books aloud with a different voice for every character. Each voice is picked to match how the book describes the character: an old Scottish lighthouse keeper with a gravelly voice gets an old, deep, slow Scottish voice, and a nine-year-old girl gets a higher, quicker one.
+
+Everything runs on your own computer, for free and offline: natural-sounding Kokoro voices, optional designed voices made from each character's description (Qwen3-TTS, Mac), and the system voices as a fallback. No account or API key is needed.
+
+**Website:** https://stanislav16.github.io/realbook · **Downloads:** [latest release](https://github.com/stanislav16/realbook/releases/latest)
+
+![RealBook reading a book with its cast of voices](docs/images/reader.png)
+
+## Install
+
+- **Mac (Apple silicon, macOS 14+):** open `RealBook.dmg` and drag **RealBook** into **Applications**. The app isn't notarized, so the first time macOS refuses to open it: go to System Settings → Privacy & Security and click **Open Anyway**.
+- **Windows 10/11 (64-bit):** unzip `RealBook-windows.zip` and run `RealBook.exe`. If SmartScreen warns about an unknown publisher, click **More info → Run anyway**. Windows has Kokoro and the Windows voices; designed voices and audiobook export are Mac-only for now.
+
+A short sample story is already in the library. Click **Add Book** (or drag a file onto the window) to import an `.epub` or `.txt`. Your books and the audio cache live in `~/Library/Application Support/RealBook` (Mac) or `%APPDATA%\RealBook` (Windows).
+
+## Build the app
+
+```bash
+./packaging/build_app.sh                                  # Mac: dist/RealBook.app and dist/RealBook.dmg
+uv run pyinstaller --noconfirm packaging/RealBook.spec    # Windows: dist/RealBook/RealBook.exe
+```
+
+The Mac app is about 490 MB, most of it the MLX runtime for designed voices; voice models are downloaded from inside the app. The Windows build is made and tested on GitHub Actions (`.github/workflows/windows.yml`) and attached to each release. Neither build is signed with a developer certificate yet.
+
+`uv run realbook-selftest [--kokoro]` (or `RealBook --selftest` for a packaged app) imports the sample book and speaks a line with each available engine, in a temporary library.
+
+## Develop
+
+```bash
+uv run realbook       # the app in a native window
+uv run realbook-web   # the same UI in your browser at http://127.0.0.1:8765
+```
+
+## How it works
+
+1. **Import**: splits the book into chapters, then into narration and quoted dialogue. Handles both “double” and ‘single’ (British) quote styles.
+2. **Find the characters**: the free analyzer looks for speech tags (`said Angus`, `she whispered`, `the old man growled`) to learn who speaks. It reads the sentences around each name to infer gender, age, accent, voice pitch and speaking pace, and attributes every quote, including conversations where lines alternate without tags.
+3. **Cast voices**: matches each character to an installed macOS voice by gender, age and accent. Pitch and speed are then adjusted from the description (deep vs. high voice, slow vs. quick talker). Characters who share a voice get different pitches so they still sound distinct.
+4. **Read**: click any line to start there. The current line is highlighted, and audio for the next few lines is prepared ahead of time. Generated audio is cached on disk, so replays are instant.
+
+## Using it
+
+- **Library:** Reading Now, All Books and Finished in the sidebar. Covers come from the EPUB; books without one get a generated cover. Each book's ••• menu has Book Info, Update from File… (re-reads the cover and chapter names from the book's file and keeps your place) and Remove.
+- **Books from Apple Books:** drag a book out of Apple Books onto the Desktop, then add it (or use it in Update from File…). Apple Books exports EPUBs as folders; RealBook reads those. Books bought in the Apple Books store are copy-protected and can't be read.
+- **Reader:** **Aa** sets the theme (Original, Paper, Sepia, Gray, Night), font, text size, justification, and whether dialogue is coloured by character. The list button shows the table of contents; the people button shows the cast.
+- **Menu bar (Mac):** RealBook → Settings… (⌘,) and Find Voice Models…, File → Add Book… (⌘O) and Library (⌘L), Playback → Next/Previous Chapter (⌘→/⌘←), Book → Show Contents (⌘1) / Show Cast (⌘2) / Export Audiobook…. On Windows, Settings and Find Voice Models are in the File menu.
+
+## On your phone, tablet or another computer
+
+**Listen over Wi‑Fi.** In Settings, turn on **Listen on Other Devices** and scan the QR code with your phone. The whole library opens in the phone's browser, laid out for a small screen, and the computer makes the voices, so designed voices work too. On iPhone, Share → Add to Home Screen gives it an app icon. Devices need the secret key in the link (a cookie remembers it); they can read, listen and edit the cast, but can't change settings or open anything on the computer. **New Link** cuts off every device paired so far. The computer stays awake while something is playing, but it has to be on and on the same network.
+
+**Take a book with you.** A book's ••• menu → **Export Audiobook…** (Mac) renders the whole book in the cast's voices into an `.m4b` audiobook with chapters, title, author and cover. It plays offline in Apple Books, BookPlayer, Smart AudioBook Player, VLC and other audiobook apps. Lines you've already listened to are reused; a long novel can take a few hours to make.
+
+**Why not a phone app?** Kokoro is small enough to run on a phone, but the designed voices' models (2.5–4.5 GB, and slower than real time on phone hardware) are not practical there, so the computer does the work.
+
+## Fixing things
+
+- **Wrong speaker?** Click the coloured name tag in front of a quote and pick the right character, or create a new one. The Cast panel's ••• menu can also find the characters again, or hand the job to Claude.
+- **Don't like a voice?** In the Cast panel, change the voice, pitch or speed. ▶ plays a sample line. Voices you set by hand are kept when you press **Re-cast**.
+- Keyboard: `space` plays and pauses, `←` / `→` move one line.
+
+## Voices
+
+**Natural voices (Kokoro).** [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) is an open-source speech model that runs offline on your Mac, about 4× faster than real time on Apple Silicon. RealBook offers a one-time 354 MB download in the library (or in Settings); afterwards every book is re-cast automatically. It has 28 American and British voices. For large casts, RealBook also blends pairs of voices to create more distinct people, and shifts pitch for children and deep-voiced characters.
+
+**Accents.** Kokoro only does American and British accents. By default, Scottish, Irish, Indian, Australian and South African characters keep a Mac voice in their own accent when one is installed. Turn this off in Settings to use Kokoro for everyone.
+
+**Designed voices (Qwen3-TTS, optional).** [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) designs a voice from a written description, accents included. RealBook writes a description for each character from what the analyzer found ("An old man in his seventies with a deep, low voice and a Scottish accent. Speaks slowly and deliberately."); with Claude analysis, Claude's sentence about how they sound is added. The 1.7B VoiceDesign model speaks a short reference clip in that voice once, and the 0.6B Base model then clones that clip for every line, so a character sounds the same throughout. In the Cast panel you can rewrite any description (Use Description), ask for a different voice from the same description (New Take), or go back to the book's description (Reset). Download it from Settings (about 6.3 GB, Apple Silicon only); RealBook then switches to designed voices and re-casts every book. You can switch back to Kokoro in Settings at any time. It runs on the MLX port in [mlx-audio](https://github.com/Blaizzy/mlx-audio), about 2× faster than real time on an M5, roughly half Kokoro's speed. Each new voice takes about 8 seconds to design, so voices for the narrator and main characters are designed in the background when you open a book. Playback keeps up at up to about 1.75× speed.
+
+**Finding newer models.** Open speech models improve quickly. **Find Voice Models…** (Settings, or the menu) lists text-to-speech models on Hugging Face, by trending, likes, downloads or release date, and marks what matters for RealBook: voice design, an MLX port that runs on a Mac, the licence, and which models RealBook already uses. Adding a new engine to RealBook still takes code; the list tells you which ones are worth it.
+
+**Better Mac voices.** Apple's *Enhanced* and *Premium* voices sound much better than the default ones. Open **Settings** → **Open VoiceOver Utility**, then go to Speech → Voice → Customize… and download a few English voices. Pick the Premium version of each voice if there is one. To read entirely with Mac voices, choose "Mac system voices" in Settings.
+
+## Optional: Claude for character analysis
+
+The free analyzer is rule-based. On long novels with many characters, it will leave some lines unattributed or give them to the wrong person. Claude reads the whole book and does this much more accurately.
+
+To use it, paste an Anthropic API key into **Settings** (gear icon). The key is stored only on this Mac, in `settings.json` inside the data folder, readable only by your user. You can also set `ANTHROPIC_API_KEY` in the environment instead. Then click **Analyze with Claude** on a book. This costs roughly $1–3 per full novel in API usage.
+
+## Files
+
+- `realbook/importer.py`: EPUB / text import and chapter detection
+- `realbook/segmenter.py`: splits narration from dialogue
+- `realbook/heuristic.py`: free character discovery, profiling and quote attribution
+- `realbook/claude_analyzer.py`: the same job done by Claude
+- `realbook/voices.py`: system voice catalogue and casting
+- `realbook/kokoro_tts.py`: Kokoro model download, voice catalogue and synthesis
+- `realbook/qwen_tts.py`: Qwen3-TTS model download, voice descriptions, voice design and cloning (on one MLX worker thread)
+- `realbook/tts.py`: picks the engine (Qwen, Kokoro or a system voice) and caches audio
+- `realbook/system.py`: what differs between macOS and Windows (data folder, system voices, audio files, opening things)
+- `realbook/remote.py`: listening on other devices (second server, pairing key, QR code)
+- `realbook/export.py`, `realbook/m4b.py`: audiobook export, and writing chapters and tags into the .m4b
+- `realbook/model_finder.py`: the Hugging Face model search
+- `realbook/selftest.py`: the smoke test used by the Windows build
+- `realbook/server.py`: local API; `realbook/static/`: the reader UI
+- `realbook/app.py`: the native window (pywebview) that hosts the UI
+- `packaging/`: app icons, PyInstaller spec, and `build_app.sh`
+- `docs/`: the website (GitHub Pages)
+
+## Licences
+
+RealBook is free software under the [GNU GPL v3](LICENSE): the packaged app includes espeak-ng (GPL-3.0), which Kokoro uses for pronunciation. The Kokoro and Qwen3-TTS models are Apache 2.0; `kokoro-onnx` and `mlx-audio` are MIT. Only DRM-free books can be read.

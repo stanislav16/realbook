@@ -200,6 +200,18 @@ def recast_all() -> None:
 
 
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
+PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
+
+
+def reprofile(book: dict) -> None:
+    """Re-read how each character sounds with the current rules, keeping who says what as it is."""
+    import copy
+
+    fresh = {c["id"]: c for c in heuristic.analyze(copy.deepcopy(book["chapters"]))["characters"]}
+    for c in book["characters"]:
+        if c["id"] in fresh:
+            c["pitch"], c["summary"] = fresh[c["id"]]["pitch"], fresh[c["id"]]["summary"]
+    book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
 
 
 def rechunk(book: dict) -> None:
@@ -248,6 +260,15 @@ def prepare() -> None:
         for d in [*BOOKS_DIR.glob("*/audio"), DATA_DIR / "previews"]:
             shutil.rmtree(d, ignore_errors=True)
         values["audio_version"] = tts.AUDIO_VERSION
+        save_settings(values)
+    if values.get("profile_version", 1) < PROFILE_VERSION:
+        for s in list_books():
+            book = load(s["id"])
+            if book["analyzer"] == "heuristic":  # Claude's profiles don't need it
+                with lock(book["id"]):
+                    reprofile(book)
+                    save(book)
+        values["profile_version"] = PROFILE_VERSION
         save_settings(values)
     if values.get("segments_version", 1) >= SEGMENTS_VERSION:
         return

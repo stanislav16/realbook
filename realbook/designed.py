@@ -42,13 +42,16 @@ DESIGNER_IDLE_SECONDS = 120  # a separate design model is unloaded when no new v
 # 13 GB on top of the model; this keeps the app at roughly model size plus the line being made.
 MLX_CACHE_LIMIT = 512 * 1024 * 1024
 
-NARRATOR_DESCRIPTION = ("A warm, clear adult female narrator with a calm, measured, storytelling delivery "
-                        "and a neutral American accent.")
+# Words like "warm", "soft", "husky" and "rich" make Breeze's voices muffled; these keep them clear.
+NARRATOR_DESCRIPTION = ("An adult woman with a bright, clear voice and a neutral American accent, "
+                        "reading a story aloud with feeling.")
 # Spoken by every designed voice; lines are cloned from it.
 REFERENCE_TEXT = ("I have been thinking about it all morning, and I suppose there is no better time to tell you. "
                   "Some things are easier to say out loud than to keep to yourself.")
 ACCENT_WORDS = {"south_african": "South African"}
-TIMBRES = ["warm", "bright", "husky", "smooth", "crisp", "rich", "soft", "slightly raspy"]
+TIMBRES = ["bright", "smooth", "clear", "expressive", "crisp", "lively", "natural", "slightly raspy"]
+DARK_ROLLOFF_HZ = 1200  # a designed voice with 95% of its sound below this is muffled; design it again
+DESIGN_ATTEMPTS = 3
 
 # Files the Qwen models share byte for byte (tokenizers and the audio codec).
 _QWEN_SHARED = {
@@ -276,7 +279,7 @@ def describe_character(char: dict) -> str:
     pitch = char.get("pitch", 0)
     # Unremarkable voices get a timbre of their own, so two plain characters don't sound alike.
     timbre = TIMBRES[int(hashlib.sha1(char["id"].encode()).hexdigest(), 16) % len(TIMBRES)]
-    voice = {-1: "a deep, low voice", 1: "a high, light voice"}.get(pitch, f"a {timbre} voice")
+    voice = {-1: f"a deep, {timbre} voice", 1: "a high, light voice"}.get(pitch, f"a {timbre} voice")
     accent = char.get("accent", "")
     text = f"{who} with {voice}"
     if accent:
@@ -400,6 +403,14 @@ def _generate(gen) -> np.ndarray:
     return np.clip(np.array(audio, dtype=np.float32).ravel(), -1, 1)
 
 
+def _rolloff(samples: np.ndarray) -> float:
+    """The frequency below which 95% of the sound's energy lies; low means muffled."""
+    power = np.abs(np.fft.rfft(samples)) ** 2
+    freqs = np.fft.rfftfreq(len(samples), 1 / SAMPLE_RATE)
+    cum = np.cumsum(power)
+    return float(freqs[np.searchsorted(cum, 0.95 * cum[-1])]) if cum[-1] > 0 else 0.0
+
+
 def _write_wav(path: Path, samples: np.ndarray) -> None:
     with wave.open(str(path), "wb") as w:
         w.setnchannels(1)
@@ -414,7 +425,16 @@ def _design(engine: Engine, key: str) -> Path:
     if ref.exists():
         return ref
     info = json.loads((voices_dir(engine) / f"{key}.json").read_text())
-    samples = _generate(engine.design(_model(engine, engine.design_role), info["description"]))
+    # Designing is random: now and then a voice comes out muffled. Try again, and keep the clearest.
+    best, best_rolloff = None, -1.0
+    for _ in range(DESIGN_ATTEMPTS):
+        samples = _generate(engine.design(_model(engine, engine.design_role), info["description"]))
+        rolloff = _rolloff(samples)
+        if rolloff > best_rolloff:
+            best, best_rolloff = samples, rolloff
+        if rolloff >= DARK_ROLLOFF_HZ:
+            break
+    samples = best
     _last_design = time.monotonic()
     tmp = ref.with_suffix(".tmp.wav")
     _write_wav(tmp, samples)

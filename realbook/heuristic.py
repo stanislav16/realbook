@@ -111,10 +111,19 @@ ACCENT_WORDS = {
     "italian": ["italian", "rome", "naples", "sicilian"],
     "spanish": ["spanish", "madrid", "mexican", "spaniard"],
 }
+# How a voice sounds. Words that only mean something about a voice when they describe one
+# ("a deep voice", not "deep in thought") need a voice word right after them; "in a low voice"
+# means quietly, so "low" doesn't count at all. Whole words only ("rough" is not "through").
+VOICE_NOUN = r"(?:[\w-]+,? ){0,2}(?:voice|voices|tone|tones|laugh|baritone|bass)\b"
 PITCH_WORDS = {
-    -1: ["deep", "booming", "gravelly", "gruff", "rough", "rumbling", "low voice", "husky", "hoarse", "bass", "baritone", "growl", "rasping", "raspy", "thunderous", "resonant", "smoky"],
-    1: ["high-pitched", "high voice", "shrill", "squeaky", "piping", "thin voice", "bright voice", "chirpy", "sing-song", "lilting", "breathy", "soprano", "tinkling", "squeak"],
+    -1: ["booming", "gravelly", "bass", "baritone", "thunderous", "rasping", "raspy", "hoarse", "growled", "gruffly"],
+    1: ["high-pitched", "shrill", "squeaky", "piping", "soprano", "squeaked", "squeaking", "sing-song", "chirpy", "tinkling"],
 }
+PITCH_VOICE_WORDS = {  # count only when describing a voice
+    -1: ["deep", "rough", "gruff", "husky", "rumbling", "resonant", "smoky", "gravel"],
+    1: ["high", "thin", "bright", "breathy", "lilting", "light", "girlish", "boyish"],
+}
+PITCH_THRESHOLD = 2  # net votes needed before a character counts as deep- or high-voiced
 PACE_WORDS = {
     -1: ["slow", "slowly", "drawl", "drawled", "measured", "deliberate", "ponderous", "unhurried", "languid", "lazily"],
     1: ["quick", "quickly", "rapid", "rapidly", "fast", "breathless", "nervous", "nervously", "chattering", "babbled", "gabbled", "jittery", "excitable", "hurried", "hurriedly", "eager"],
@@ -489,8 +498,13 @@ def _profile(c: _Char, text: str, sent: str) -> None:
                 useful = True
     for direction, words in PITCH_WORDS.items():
         for w in words:
-            if w in low:
+            if re.search(r"\b%s\b" % re.escape(w), low):
                 c.votes["pitch"][direction] += 1
+                useful = True
+    for direction, words in PITCH_VOICE_WORDS.items():
+        for w in words:
+            if re.search(r"\b%s\b,? %s" % (re.escape(w), VOICE_NOUN), low):
+                c.votes["pitch"][direction] += 2  # said outright: "a deep voice"
                 useful = True
     for direction, words in PACE_WORDS.items():
         for w in words:
@@ -536,7 +550,8 @@ def _gender(c: _Char) -> str:
 def _export(c: _Char) -> dict:
     age = c.votes["age"].most_common(1)[0][0] if c.votes["age"] else "adult"
     accent = c.votes["accent"].most_common(1)[0][0] if c.votes["accent"] else ""
-    pitch = sum(k * v for k, v in c.votes["pitch"].items())
+    net = sum(k * v for k, v in c.votes["pitch"].items())
+    pitch = 0 if abs(net) < PITCH_THRESHOLD else (1 if net > 0 else -1)
     pace = sum(k * v for k, v in c.votes["pace"].items())
     gender = _gender(c)
     bits = [b for b in (age if age != "adult" else "", gender if gender != "unknown" else "", accent.replace("_", " ")) if b]

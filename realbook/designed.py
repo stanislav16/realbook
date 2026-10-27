@@ -38,6 +38,9 @@ from . import store, system
 HF = "https://huggingface.co"
 SAMPLE_RATE = 24000
 DESIGNER_IDLE_SECONDS = 120  # a separate design model is unloaded when no new voices are being made
+# MLX keeps memory freed by each line in a cache for reuse. Unlimited, that cache grows to over
+# 13 GB on top of the model; this keeps the app at roughly model size plus the line being made.
+MLX_CACHE_LIMIT = 512 * 1024 * 1024
 
 NARRATOR_DESCRIPTION = ("A warm, clear adult female narrator with a calm, measured, storytelling delivery "
                         "and a neutral American accent.")
@@ -347,6 +350,9 @@ def _submit(priority: int, fn, *args) -> Future:
 
 
 def _work() -> None:
+    import mlx.core as mx
+
+    mx.set_cache_limit(MLX_CACHE_LIMIT)
     while True:
         try:
             _, _, fn, args, fut = _queue.get(timeout=30)

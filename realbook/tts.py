@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import abbrev, designed, kokoro_tts, system
 
+AUDIO_VERSION = 2  # bump when the audio format changes; store.prepare() clears audio made the old way
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
@@ -58,7 +59,7 @@ def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: i
         voice = "kokoro:af_heart"  # designed voices were removed; keep reading with the next best
     if voice.startswith("kokoro:") and not kokoro_tts.installed():
         voice = system.default_voice()  # natural voices were removed; keep reading with a system voice
-    key = hashlib.sha1(f"{voice}|{rate}|{pitch_shift}|{text}".encode()).hexdigest()
+    key = hashlib.sha1(f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}".encode()).hexdigest()
     out = cache_dir / f"{key}{system.AUDIO_EXT}"
     if out.exists():
         return out

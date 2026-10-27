@@ -156,7 +156,7 @@ def _run(book_id: str) -> None:
             caf.close()
 
         job.update(message="Encoding the audiobook…")
-        subprocess.run(["afconvert", "-f", "m4bf", "-d", "aac", "-b", str(BITRATE), str(work), str(encoded)],
+        subprocess.run(["afconvert", "-f", "m4bf", "-d", "aac", "-b", str(BITRATE), "-q", "127", str(work), str(encoded)],
                        check=True, capture_output=True)
         cover = None
         if book.get("cover"):

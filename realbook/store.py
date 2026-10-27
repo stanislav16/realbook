@@ -237,8 +237,18 @@ def rechunk(book: dict) -> None:
 
 
 def prepare() -> None:
-    """Bring older libraries up to date with the current segmentation rules."""
+    """Bring older libraries up to date: current segmentation rules, and audio in the current format."""
+    from . import tts
+
     values = settings()
+    if values.get("audio_version", 1) < tts.AUDIO_VERSION:
+        # Lines are made again, at the current quality, the next time they're played.
+        import shutil
+
+        for d in [*BOOKS_DIR.glob("*/audio"), DATA_DIR / "previews"]:
+            shutil.rmtree(d, ignore_errors=True)
+        values["audio_version"] = tts.AUDIO_VERSION
+        save_settings(values)
     if values.get("segments_version", 1) >= SEGMENTS_VERSION:
         return
     for s in list_books():

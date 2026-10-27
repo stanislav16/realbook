@@ -62,7 +62,9 @@ def encode(wav: Path, out: Path, sample_rate: int) -> None:
     """
     if MAC:
         try:
-            run(["afconvert", "-f", "m4af", "-d", f"aac@{sample_rate}", str(wav), str(out)],
+            # Variable bitrate at top quality (about 90 kbit/s for a voice). afconvert's default for
+            # 24 kHz mono is 33 kbit/s, which cuts the treble and makes voices sound muffled.
+            run(["afconvert", "-f", "m4af", "-d", f"aac@{sample_rate}", "-s", "3", "-u", "vbrq", "127", str(wav), str(out)],
                 check=True, capture_output=True, timeout=120)
         finally:
             wav.unlink(missing_ok=True)
@@ -116,9 +118,12 @@ _SAPI = (
 def speak(text: str, voice: str, rate: int, pitch_shift: int, out: Path) -> None:
     """Render `text` with a system voice to `out` (the cached audio file)."""
     if MAC:
+        # `say` ignores bitrate settings when writing AAC, so write raw audio and encode it like the rest.
         prefix = f"[[pbas {pitch_shift:+d}]] " if pitch_shift else ""
-        run(["say", "-v", voice, "-r", str(int(rate)), "-o", str(out), "--file-format=m4af", "--data-format=aac"],
+        wav = out.with_suffix(".say.wav")
+        run(["say", "-v", voice, "-r", str(int(rate)), "-o", str(wav), "--file-format=WAVE", "--data-format=LEI16@22050"],
             input=prefix + text, text=True, check=True, capture_output=True, timeout=120)
+        encode(wav, out, 22050)
         return
     if not WINDOWS:
         raise RuntimeError("System voices aren't available on this computer; download natural voices in Settings")

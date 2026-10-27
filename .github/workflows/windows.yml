@@ -47,8 +47,14 @@ jobs:
           name: RealBook-windows
           path: RealBook-windows.zip
 
+      # On a new release, or when run by hand (Actions → Windows build → Run workflow), attach the
+      # build to that release, or to the latest one.
       - name: Attach to the release
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" RealBook-windows.zip --clobber
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $tag = if ($env:TAG) { $env:TAG } else { gh release view --json tagName --jq .tagName }
+          gh release upload $tag RealBook-windows.zip --clobber

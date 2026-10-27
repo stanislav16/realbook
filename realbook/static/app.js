@@ -593,12 +593,12 @@ function voiceSelect(current, onchange) {
     groups.get(key).push(v);
   }
   const sel = el("select", { onchange: (e) => onchange(e.target.value) });
-  if (current.startsWith("qwen:")) {
+  if (isDesigned(current)) {
     sel.append(el("optgroup", { label: "Designed" }, el("option", { value: current, selected: true }, "Designed voice")));
   } else if (designing()) {
     sel.append(el("optgroup", { label: "Designed" }, el("option", { value: "designed" }, "Designed voice (from description)")));
   }
-  if (!current.startsWith("qwen:") && !S.voices.some((v) => v.name === current)) {
+  if (!isDesigned(current) && !S.voices.some((v) => v.name === current)) {
     sel.append(el("option", { value: current, selected: true }, `${current.replace("kokoro:", "")} (not available)`));
   }
   for (const [label, vs] of groups) {
@@ -631,7 +631,9 @@ function preview(settings, text) {
   new Audio(`/api/preview?${q}`).play().catch(() => {});
 }
 
-const designing = () => S.config.voice_engine === "qwen" && S.config.qwen?.installed;
+const DESIGNED = ["qwen", "breeze"];  // engines that make voices from descriptions
+const isDesigned = (voice) => DESIGNED.some((e) => voice.startsWith(e + ":"));
+const designing = () => DESIGNED.includes(S.config.voice_engine) && S.config[S.config.voice_engine]?.installed;
 
 function voiceControls(person, who, save, text) {
   const s = { voice: person.voice, rate: person.rate, pitch_shift: person.pitch_shift || 0 };
@@ -648,7 +650,7 @@ function voiceControls(person, who, save, text) {
       el("button", { class: "button small", title: "Hear this voice", onclick: () => preview(s, text) }, "▶")),
     ...(designing() ? designControls(person, who, text) : []),
     // Designed voices get their pitch and pace from the description.
-    ...(s.voice.startsWith("qwen:") ? [] : [
+    ...(isDesigned(s.voice) ? [] : [
       slider("Pitch", -20, 20, s.pitch_shift, (v) => (v > 0 ? "+" : "") + v, (v) => commit({ pitch_shift: v })),
       slider("Speed", 110, 280, s.rate, (v) => v, (v) => commit({ rate: v })),
     ]),
@@ -803,8 +805,9 @@ async function openSettings() {
   closePopovers();
   S.config = await api("/api/config");
   const c = S.config;
-  const k = c.kokoro, q = c.qwen;
-  const status = el("p", { class: "muted small" }), qStatus = el("p", { class: "muted small" });
+  const k = c.kokoro;
+  const designedEngines = DESIGNED.map((name) => [name, c[name]]).filter(([, d]) => d);
+  const status = el("p", { class: "muted small" });
   const voiceSection = el("section", { class: "settings-section" }, el("h4", {}, "Voices"));
   if (!k.installed) {
     voiceSection.append(
@@ -817,28 +820,35 @@ async function openSettings() {
       status);
     if (k.state === "downloading" || k.state === "error") watchInstall(status, "kokoro");
   }
-  if (k.installed || q.installed) {
+  if (k.installed || designedEngines.some(([, d]) => d.installed)) {
     voiceSection.append(...[
       el("label", { class: "field" }, el("span", {}, "Read books with"),
         el("select", { name: "voice_engine" },
           k.installed ? el("option", { value: "kokoro", selected: c.voice_engine === "kokoro" }, "Natural voices (Kokoro)") : null,
-          q.installed ? el("option", { value: "qwen", selected: c.voice_engine === "qwen" }, "Designed voices (Qwen3-TTS)") : null,
+          ...designedEngines.filter(([, d]) => d.installed).map(([name, d]) => el("option", { value: name, selected: c.voice_engine === name }, d.label)),
           el("option", { value: "apple", selected: c.voice_engine === "apple" }, c.platform === "mac" ? "Mac system voices" : "Windows voices"))),
       k.installed ? el("label", { class: "check" }, el("input", { type: "checkbox", name: "apple_for_accents", checked: c.apple_for_accents }),
         el("span", {}, "With natural voices, use Mac voices for Scottish, Irish, Indian, Australian and South African characters, when one with that accent is installed (natural voices only do American and British)")) : null,
       el("p", { class: "muted small" }, "Changing these re-casts every book. Voices you picked by hand are kept."),
     ].filter(Boolean));
   }
-  if (q.supported && !q.installed) {
-    voiceSection.append(
-      el("p", { class: "muted" }, `Designed voices (Qwen3-TTS) make a voice for each character from how the book describes them, accents included, and you can rewrite any description. Slower than natural voices; free and offline. One-time download of ${(q.bytes / 1e9).toFixed(1)} GB.`),
-      el("button", { class: "button small", type: "button", disabled: q.state === "downloading", onclick: async (e) => {
+  const toGet = designedEngines.filter(([, d]) => d.supported && !d.installed);
+  if (toGet.length) {
+    voiceSection.append(el("p", { class: "muted" }, "Designed voices make a voice for each character from how the book describes them, accents included, and you can rewrite any description. Slower than natural voices; free and offline."));
+  }
+  for (const [name, d] of toGet) {
+    const dStatus = el("p", { class: "muted small" });
+    voiceSection.append(el("div", { class: "engine-offer" },
+      el("strong", {}, d.label.replace("Designed voices ", "").replace(/[()]/g, "")),
+      el("p", { class: "muted small" }, `${d.speed} One-time download of ${(d.bytes / 1e9).toFixed(1)} GB.`),
+      d.licence ? el("p", { class: "small" }, d.licence) : null,
+      el("button", { class: "button small", type: "button", disabled: d.state === "downloading", onclick: async (e) => {
         e.currentTarget.disabled = true;
-        await startInstall("qwen");
-        watchInstall(qStatus, "qwen");
-      } }, q.state === "downloading" ? "Downloading…" : "Download Designed Voices"),
-      qStatus);
-    if (q.state === "downloading" || q.state === "error") watchInstall(qStatus, "qwen");
+        await startInstall(name);
+        watchInstall(dStatus, name);
+      } }, d.state === "downloading" ? "Downloading…" : `Download ${d.label.match(/\((.*)\)/)?.[1] || "Voices"}`),
+      dStatus));
+    if (d.state === "downloading" || d.state === "error") watchInstall(dStatus, name);
   }
   voiceSection.append(
     el("button", { class: "button small", type: "button", onclick: () => openModelFinder() }, "Find Voice Models…"),
@@ -1015,7 +1025,7 @@ function openModelFinder() {
   load();
 }
 
-// `which` is "kokoro" (natural voices) or "qwen" (designed voices).
+// `which` is "kokoro" (natural voices) or a designed-voice engine ("qwen", "breeze").
 async function startInstall(which) {
   try {
     S.config[which] = await api(`/api/${which}/install`, { method: "POST" });
@@ -1034,7 +1044,7 @@ function watchInstall(target, which) {
       clearInterval(S.installTimer);
       if (k.installed) {
         $("#dialog [data-cancel]")?.click();
-        toast(which === "qwen" ? "Designed voices installed. Every book has been re-cast with them"
+        toast(DESIGNED.includes(which) ? `${S.config[which].label} installed. Every book has been re-cast with them`
           : "Natural voices installed. Every book has been re-cast with them", 6000);
         await refreshCast();
         if (!S.book) showLibrary();

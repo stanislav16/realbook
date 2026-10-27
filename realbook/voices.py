@@ -6,7 +6,7 @@ import re
 import subprocess
 import time
 
-from . import kokoro_tts, qwen_tts, store, system
+from . import designed, kokoro_tts, store, system
 
 # Gender / age / quality for voices macOS ships or offers as downloads.
 # quality: 3 = Premium, 2 = Enhanced or a good classic voice, 1 = basic/robotic.
@@ -99,8 +99,10 @@ def use_kokoro() -> bool:
     return kokoro_tts.installed() and store.settings().get("voice_engine", "kokoro") == "kokoro"
 
 
-def use_qwen() -> bool:
-    return qwen_tts.installed() and store.settings().get("voice_engine", "kokoro") == "qwen"
+def designed_engine() -> designed.Engine | None:
+    """The designed-voice engine (Qwen3-TTS or Breeze-TTS-2) books are read with, if one is chosen."""
+    engine = designed.ENGINES.get(store.settings().get("voice_engine", "kokoro"))
+    return engine if engine and designed.installed(engine) else None
 
 
 def selectable_voices() -> list[dict]:
@@ -111,8 +113,8 @@ def selectable_voices() -> list[dict]:
 def lookup(name: str) -> dict | None:
     if name.startswith("kokoro:"):
         return kokoro_tts.describe(name)
-    if name.startswith("qwen:"):
-        return qwen_tts.describe(name)
+    if designed.engine_of(name):
+        return designed.describe(name)
     return next((v for v in installed_voices() if v["name"] == name), None)
 
 
@@ -176,8 +178,9 @@ def cast(characters: list[dict], narrator: dict | None = None) -> tuple[dict, li
     characters are separated with different pitch and speed. With designed voices, everyone
     gets a voice of their own, made from their description.
     """
-    if use_qwen():
-        return _cast_designed(characters, narrator or {})
+    engine = designed_engine()
+    if engine:
+        return _cast_designed(engine, characters, narrator or {})
     apple = english_voices() or installed_voices()
     kokoro = ([v for v in kokoro_tts.catalog() if v["grade"] >= kokoro_tts.CAST_MIN_GRADE] + kokoro_tts.blends()
               if use_kokoro() else [])
@@ -236,14 +239,14 @@ def cast(characters: list[dict], narrator: dict | None = None) -> tuple[dict, li
     return narrator, cast_chars
 
 
-def _designed(person: dict, description: str, seed: str) -> dict:
-    voice = qwen_tts.voice_for(description, seed=seed, take=person.get("voice_take", 0))
+def _designed(engine: designed.Engine, person: dict, description: str, seed: str) -> dict:
+    voice = designed.voice_for(engine, description, seed=seed, take=person.get("voice_take", 0))
     return {**person, "voice": voice, "rate": DEFAULT_RATE, "pitch_shift": 0, "designed_from": description}
 
 
-def _cast_designed(characters: list[dict], narrator: dict) -> tuple[dict, list[dict]]:
+def _cast_designed(engine: designed.Engine, characters: list[dict], narrator: dict) -> tuple[dict, list[dict]]:
     if not (narrator.get("locked") and narrator.get("voice")):
-        narrator = _designed(narrator, narrator.get("voice_description") or qwen_tts.NARRATOR_DESCRIPTION, "narrator")
-    cast_chars = [c if c.get("locked") and c.get("voice") else _designed(c, qwen_tts.describe_character(c), c["id"])
+        narrator = _designed(engine, narrator, narrator.get("voice_description") or designed.NARRATOR_DESCRIPTION, "narrator")
+    cast_chars = [c if c.get("locked") and c.get("voice") else _designed(engine, c, designed.describe_character(c), c["id"])
                   for c in characters]
     return narrator, cast_chars

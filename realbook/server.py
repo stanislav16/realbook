@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import claude_analyzer, export, heuristic, kokoro_tts, model_finder, qwen_tts, remote, store, system, tts, voices
+from . import claude_analyzer, export, heuristic, kokoro_tts, model_finder, designed, remote, store, system, tts, voices
 
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="RealBook")
@@ -74,7 +74,7 @@ def config(request: Request = None):
         "voice_engine": values.get("voice_engine", "kokoro"),
         "apple_for_accents": values.get("apple_for_accents", True),
         "kokoro": kokoro_tts.install_status(),
-        "qwen": qwen_tts.install_status(),
+        **{name: designed.install_status(engine) for name, engine in designed.ENGINES.items()},
         "appearance": values.get("appearance", {}),
         "hide_voice_banner": values.get("hide_voice_banner", False),
         # On another device, the UI hides what only works on the Mac.
@@ -86,7 +86,7 @@ def config(request: Request = None):
 
 class SettingsUpdate(BaseModel):
     anthropic_api_key: str | None = None
-    voice_engine: str | None = None  # "kokoro" | "apple" | "qwen"
+    voice_engine: str | None = None  # "kokoro" | "apple" | "qwen" | "breeze"
     apple_for_accents: bool | None = None
     appearance: dict | None = None  # reader theme, font, size: kept here because the app's port changes each launch
     hide_voice_banner: bool | None = None
@@ -108,9 +108,9 @@ def update_settings(s: SettingsUpdate):
     if s.hide_voice_banner is not None:
         values["hide_voice_banner"] = s.hide_voice_banner
     voice_change = False
-    if s.voice_engine == "qwen" and not qwen_tts.installed():
-        raise HTTPException(400, "Download designed voices first")
-    if s.voice_engine in ("kokoro", "apple", "qwen") and s.voice_engine != values.get("voice_engine", "kokoro"):
+    if s.voice_engine in designed.ENGINES and not designed.installed(designed.ENGINES[s.voice_engine]):
+        raise HTTPException(400, "Download these voices first")
+    if s.voice_engine in ("kokoro", "apple", *designed.ENGINES) and s.voice_engine != values.get("voice_engine", "kokoro"):
         values["voice_engine"] = s.voice_engine
         voice_change = True
     if s.apple_for_accents is not None and s.apple_for_accents != values.get("apple_for_accents", True):
@@ -119,8 +119,8 @@ def update_settings(s: SettingsUpdate):
     store.save_settings(values)
     if voice_change:
         store.recast_all()
-        if voices.use_qwen():
-            qwen_tts.warm_up()
+        if voices.designed_engine():
+            designed.warm_up(voices.designed_engine())
     return config()
 
 
@@ -130,37 +130,19 @@ def install_kokoro():
     return kokoro_tts.install_async(on_done=store.recast_all)
 
 
-@app.post("/api/qwen/install")
-def install_qwen():
-    """Download the voice design models, then switch to designed voices and re-cast every book."""
+@app.post("/api/{engine}/install")
+def install_designed(engine: str):
+    """Download a designed-voice engine's models, then switch to it and re-cast every book."""
+    if engine not in designed.ENGINES:
+        raise HTTPException(404, "Unknown voice engine")
+    e = designed.ENGINES[engine]
+
     def use_them():
-        store.save_settings({**store.settings(), "voice_engine": "qwen"})
+        store.save_settings({**store.settings(), "voice_engine": engine})
         store.recast_all()
-        qwen_tts.warm_up()
+        designed.warm_up(e)
 
-    return qwen_tts.install_async(on_done=use_them)
-
-
-@app.get("/api/models/search")
-def search_models(q: str = "", sort: str = "trending", english: bool = True):
-    """Text-to-speech models on Hugging Face, to spot a better voice engine when one comes out."""
-    try:
-        return model_finder.search(q.strip()[:100], sort, english)
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
-
-
-class Link(BaseModel):
-    url: str
-
-
-@app.post("/api/open-link")
-def open_link(link: Link):
-    """Open a model page in the default browser (only Hugging Face pages)."""
-    if not link.url.startswith("https://huggingface.co/"):
-        raise HTTPException(400, "Only Hugging Face links can be opened")
-    system.open_url(link.url)
-    return {"ok": True}
+    return designed.install_async(e, on_done=use_them)
 
 
 @app.get("/api/remote")
@@ -231,9 +213,9 @@ def delete_book(book_id: str):
 @app.get("/api/books/{book_id}")
 def get_book(book_id: str):
     b = _book(book_id)
-    if voices.use_qwen():
+    if voices.designed_engine():
         talkers = sorted(b["characters"], key=lambda c: -c.get("lines", 0))[:12]
-        qwen_tts.design_ahead([b["narrator"]["voice"]] + [c["voice"] for c in talkers])
+        designed.design_ahead([b["narrator"]["voice"]] + [c["voice"] for c in talkers])
     return {
         **store.summary(b),
         "narrator": b["narrator"],
@@ -319,7 +301,7 @@ class Design(BaseModel):
 @app.put("/api/books/{book_id}/design/{who}")
 def design_voice(book_id: str, who: str, d: Design):
     """Give the narrator or a character a designed voice: from a new description, or a new take."""
-    if not voices.use_qwen():
+    if not voices.designed_engine():
         raise HTTPException(400, "Turn on designed voices in Settings first")
     b = _book(book_id)
 
@@ -341,7 +323,7 @@ def design_voice(book_id: str, who: str, d: Design):
         b["narrator"], b["characters"] = voices.cast(b["characters"], b["narrator"])
         store.save(b)
         person = find()
-    qwen_tts.design_ahead([person["voice"]])
+    designed.design_ahead([person["voice"]])
     return person
 
 
@@ -532,8 +514,8 @@ def index():
 def prepare_library() -> None:
     """Update older libraries, and give an empty one the sample story."""
     store.prepare()
-    if voices.use_qwen():
-        qwen_tts.warm_up()
+    if voices.designed_engine():
+        designed.warm_up(voices.designed_engine())
     if remote.enabled():
         remote.start()
     if store.list_books():

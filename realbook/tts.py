@@ -7,7 +7,7 @@ import re
 import threading
 from pathlib import Path
 
-from . import abbrev, kokoro_tts, qwen_tts, system
+from . import abbrev, designed, kokoro_tts, system
 
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -53,7 +53,8 @@ def _clean(text: str) -> str:
 def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: int, urgent: bool = True) -> Path:
     """Render `text` to an audio file (once) and return its path."""
     text = _clean(text)
-    if voice.startswith("qwen:") and not qwen_tts.installed():
+    engine = designed.engine_of(voice)
+    if engine and not designed.installed(engine):
         voice = "kokoro:af_heart"  # designed voices were removed; keep reading with the next best
     if voice.startswith("kokoro:") and not kokoro_tts.installed():
         voice = system.default_voice()  # natural voices were removed; keep reading with a system voice
@@ -68,8 +69,8 @@ def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: i
             return out
         cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".tmp" + system.AUDIO_EXT)
-        if voice.startswith("qwen:"):
-            qwen_tts.synthesize(tmp, text, voice, urgent)  # has its own queue, with the same priorities
+        if designed.engine_of(voice):
+            designed.synthesize(tmp, text, voice, urgent)  # has its own queue, with the same priorities
         elif voice.startswith("kokoro:"):
             _kokoro_gate.acquire(urgent)
             try:

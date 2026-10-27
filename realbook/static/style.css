@@ -307,3 +307,6 @@ body.remote .mac-only { display: none !important; }
 .export-bar > div { height: 100%; background: var(--accent); transition: width .4s; }
 .error { color: var(--danger); }
 a.button { text-decoration: none; display: inline-flex; align-items: center; }
+
+.engine-offer { border: .5px solid var(--separator); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+.engine-offer p { margin: 4px 0 8px; }

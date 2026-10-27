@@ -16,7 +16,7 @@ from . import system
 API = "https://huggingface.co/api/models"
 SORTS = {"trending": "trendingScore", "likes": "likes", "downloads": "downloads", "new": "createdAt"}
 # Models RealBook already uses, by the start of their repository name.
-IN_REALBOOK = {"hexgrad/kokoro": "Kokoro", "qwen/qwen3-tts": "Qwen3-TTS"}
+IN_REALBOOK = {"hexgrad/kokoro": "Kokoro", "qwen/qwen3-tts": "Qwen3-TTS", "breezeblue/breeze-tts-2": "Breeze-TTS-2"}
 FEATURES = {
     "voice-design": "Voice design", "voice-cloning": "Voice cloning", "voice-clone": "Voice cloning",
     "emotional-speech-generation": "Emotion", "voice-direction": "Emotion", "multi-speaker": "Multi-speaker",

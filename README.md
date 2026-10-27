@@ -69,6 +69,8 @@ uv run realbook-web   # the same UI in your browser at http://127.0.0.1:8765
 
 **Designed voices (Qwen3-TTS, optional).** [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) designs a voice from a written description, accents included. RealBook writes a description for each character from what the analyzer found ("An old man in his seventies with a deep, low voice and a Scottish accent. Speaks slowly and deliberately."); with Claude analysis, Claude's sentence about how they sound is added. The 1.7B VoiceDesign model speaks a short reference clip in that voice once, and the 0.6B Base model then clones that clip for every line, so a character sounds the same throughout. In the Cast panel you can rewrite any description (Use Description), ask for a different voice from the same description (New Take), or go back to the book's description (Reset). Download it from Settings (about 6.3 GB, Apple Silicon only); RealBook then switches to designed voices and re-casts every book. You can switch back to Kokoro in Settings at any time. It runs on the MLX port in [mlx-audio](https://github.com/Blaizzy/mlx-audio), about 2× faster than real time on an M5, roughly half Kokoro's speed. Each new voice takes about 8 seconds to design, so voices for the narrator and main characters are designed in the background when you open a book. Playback keeps up at up to about 1.75× speed.
 
+**Breeze-TTS-2 (optional, personal use).** A second designed-voice engine, rated higher for quality than Qwen3-TTS on public leaderboards. One 3B model (8-bit, 4.6 GB) designs and reads; on an M5 it's about as fast as listening (1.0× real time, versus 2× for Qwen), so faster playback may pause between lines. Its licence allows research and non-commercial use only, which covers listening to your own books. Download it in Settings; switching between Qwen and Breeze keeps your rewritten descriptions.
+
 **Finding newer models.** Open speech models improve quickly. **Find Voice Models…** (Settings, or the menu) lists text-to-speech models on Hugging Face, by trending, likes, downloads or release date, and marks what matters for RealBook: voice design, an MLX port that runs on a Mac, the licence, and which models RealBook already uses. Adding a new engine to RealBook still takes code; the list tells you which ones are worth it.
 
 **Better Mac voices.** Apple's *Enhanced* and *Premium* voices sound much better than the default ones. Open **Settings** → **Open VoiceOver Utility**, then go to Speech → Voice → Customize… and download a few English voices. Pick the Premium version of each voice if there is one. To read entirely with Mac voices, choose "Mac system voices" in Settings.
@@ -87,7 +89,7 @@ To use it, paste an Anthropic API key into **Settings** (gear icon). The key is 
 - `realbook/claude_analyzer.py`: the same job done by Claude
 - `realbook/voices.py`: system voice catalogue and casting
 - `realbook/kokoro_tts.py`: Kokoro model download, voice catalogue and synthesis
-- `realbook/qwen_tts.py`: Qwen3-TTS model download, voice descriptions, voice design and cloning (on one MLX worker thread)
+- `realbook/designed.py`: designed-voice engines (Qwen3-TTS, Breeze-TTS-2): model download, voice descriptions, voice design and cloning (on one MLX worker thread)
 - `realbook/tts.py`: picks the engine (Qwen, Kokoro or a system voice) and caches audio
 - `realbook/system.py`: what differs between macOS and Windows (data folder, system voices, audio files, opening things)
 - `realbook/remote.py`: listening on other devices (second server, pairing key, QR code)

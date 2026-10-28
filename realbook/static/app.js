@@ -667,8 +667,26 @@ function designControls(person, who, text) {
       el("button", { class: "button small", title: "Same description, a different voice", onclick: () => designVoice(who, { new_take: true }, text) }, "New Take"),
       person.voice_description
         ? el("button", { class: "button small", title: "Go back to the description written from the book", onclick: () => designVoice(who, { description: "" }, text) }, "Reset")
-        : null),
+        : null,
+      person.locked
+        ? el("button", { class: "button small", title: "Let this character's voice follow the book again (it may change)", onclick: () => designVoice(who, {}, text) }, "Unpin Voice")
+        : el("button", { class: "button small", title: "Keep exactly this voice: new descriptions, re-casts and updates won't replace it", onclick: () => keepVoice(person, who) }, "Keep Voice")),
   ];
+}
+
+// Pin the voice a character has now, so later analysis or updates never replace it.
+async function keepVoice(person, who) {
+  const b = S.book;
+  const body = { voice: person.voice, rate: person.rate || 180, pitch_shift: person.pitch_shift || 0 };
+  try {
+    if (who === "narrator") b.narrator = await api(`/api/books/${b.id}/narrator`, { method: "PUT", json: body });
+    else {
+      const updated = await api(`/api/books/${b.id}/characters/${who}`, { method: "PUT", json: body });
+      b.cast = b.cast.map((c) => (c.id === who ? updated : c));
+    }
+    renderCast();
+    toast("Voice kept. Updates and re-runs won't change it");
+  } catch (e) { toast(e.message); }
 }
 
 async function designVoice(who, json, text) {
@@ -702,7 +720,7 @@ function renderCast() {
       ...voiceControls(c, c.id, async (s) => {
         Object.assign(c, await api(`/api/books/${b.id}/characters/${c.id}`, { method: "PUT", json: s }));
       }, sampleLine(c.id)),
-      c.locked ? el("div", { class: "lock" }, "Voice set by you. Re-cast keeps it.") : null,
+      c.locked ? el("div", { class: "lock" }, "Voice kept by you: updates and re-casts won't change it.") : null,
     );
   });
   $("#cast-list").replaceChildren(narrator, ...cards);
@@ -771,9 +789,9 @@ async function analyze(engine) {
   const msg = engine === "claude"
     ? "Claude will read the whole book to describe each character and decide who says every line. This uses your Anthropic API credits (roughly $1–3 for a full novel). Speakers you fixed by hand will be replaced."
     : engine === "local"
-      ? `A small AI model on this Mac (${ai.label}) reads what the book says about each of the main characters and decides their gender, age, accent and how they sound. Free and offline; it takes a few seconds per character. Who says which line stays as it is, and voices or descriptions you set by hand are kept.${ai.installed ? "" : ` The first time, it downloads the model (${(ai.bytes / 1e9).toFixed(1)} GB).`}`
+      ? `A small AI model on this Mac (${ai.label}) reads what the book says about each of the main characters and decides their gender, age, accent and how they sound. Free and offline; it takes a few seconds per character. Who says which line stays as it is. Characters whose description changes get a new voice, except voices you've kept (Keep Voice) and descriptions you wrote.${ai.installed ? "" : ` The first time, it downloads the model (${(ai.bytes / 1e9).toFixed(1)} GB).`}`
       : engine === "local-speakers"
-        ? `The AI model on this Mac (${ai.label}) reads each scene and decides who speaks the lines that have no speech tag, where RealBook otherwise just guesses that speakers take turns. Lines with a tag ("said Paul") and lines you set by hand stay as they are. Free and offline; about a minute per busy chapter (around half an hour for a long novel), and you can keep listening meanwhile.${ai.installed ? "" : ` The first time, it downloads the model (${(ai.bytes / 1e9).toFixed(1)} GB).`}`
+        ? `The AI model on this Mac (${ai.label}) reads each scene and decides who speaks the lines that have no speech tag, where RealBook otherwise just guesses that speakers take turns. Lines with a tag ("said Paul") and lines you set by hand stay as they are. Then it describes the characters again from their corrected lines; characters whose description changes get a new voice, except voices you've kept. Free and offline; about a minute per busy chapter (around half an hour for a long novel), and you can keep listening meanwhile.${ai.installed ? "" : ` The first time, it downloads the model (${(ai.bytes / 1e9).toFixed(1)} GB).`}`
         : "RealBook will look for the characters again with its built-in finder. Speakers you fixed by hand will be replaced.";
   const title = { claude: "Analyze with Claude", local: "Describe characters with local AI", "local-speakers": "Find speakers with local AI", heuristic: "Find characters again" }[engine];
   if (!(await ask({ title, text: msg, ok: "Start" }))) return;

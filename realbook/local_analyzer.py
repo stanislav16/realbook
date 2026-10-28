@@ -112,13 +112,10 @@ def apply(book: dict, results: dict[str, dict]) -> int:
         p = results.get(c["id"])
         if not p:
             continue
-        # Run again, the model can word a character differently (its input changes when speakers
-        # are fixed), and new words mean a new voice. Keep the voice unless the basics changed.
-        keep_voice = c.get("profiled_by") == "local-ai" and all(c.get(k) == p[k] for k in ("gender", "age", "accent"))
-        for k in ("gender", "age", "accent") if keep_voice else ("gender", "age", "accent", "pitch", "pace", "sound", "manner"):
+        # Always the latest reading (e.g. with speakers corrected): a changed description gets a new
+        # voice. Voices the user kept (pinned) stay, and so do descriptions they wrote themselves.
+        for k in ("gender", "age", "accent", "pitch", "pace", "sound", "manner"):
             c[k] = p[k]
-        if keep_voice:
-            p = {**p, "sound": c.get("sound", ""), "manner": c.get("manner", "")}
         c["not_person"] = not p["is_person"]
         bits = [p["age"] if p["age"] != "adult" else "", p["gender"] if p["gender"] != "unknown" else "",
                 p["accent"].replace("_", " "), p["sound"]]

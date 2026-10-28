@@ -403,7 +403,18 @@ def analyze(book_id: str, req: AnalyzeRequest):
                 if not local_analyzer.installed():
                     local_analyzer.install(lambda msg: job.update(message=msg))
                 n = local_analyzer.find_speakers(book_id, progress=lambda msg: job.update(message=msg))
-                job.update(state="done", message=f"Decided who speaks {n} lines that had no speech tag")
+                # With the corrected lines, the AI knows the characters better: describe them again.
+                import copy
+
+                snapshot = copy.deepcopy(store.load(book_id))
+                results = local_analyzer.profile_book(
+                    snapshot, local_analyzer.model_dir(),
+                    progress=lambda msg: job.update(message="Updating descriptions with the corrected lines: " + msg[0].lower() + msg[1:]))
+                with store.lock(book_id):
+                    book = store.load(book_id)
+                    local_analyzer.apply(book, results)
+                    store.save(book)
+                job.update(state="done", message=f"Decided who speaks {n} untagged lines, and updated the descriptions")
             except Exception as e:  # surfaced to the UI
                 job.update(state="error", message=str(e))
 

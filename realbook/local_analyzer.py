@@ -443,6 +443,32 @@ def quotes_to_decide(chapter: dict) -> set[int]:
     return out
 
 
+def one_speaker_per_paragraph(chapter: dict, got: dict[int, str], todo: set[int], cast: list[dict]) -> dict[int, str]:
+    """A new speaker starts a new paragraph. When the model splits a paragraph's quotes between
+    people but the narration around them names nobody else, they're all the first quote's speaker
+    (usually the one with the "he said"). A paragraph that names a second character may really
+    have two speakers ("Idaho mumbled. Jessica looked down…"), so it's left alone."""
+    names = {}
+    for c in cast:
+        for n in [c["name"], *c.get("aliases", []), *c.get("other_names", [])]:
+            if len(n) > 2 and n.lower() not in ("she", "he"):
+                names[n] = c["id"]
+    name_re = re.compile(r"\b(%s)\b" % "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))) if names else None
+    fixed = dict(got)
+    for p in paragraphs(chapter):
+        qs = [x[1] for x in p["parts"] if x[0] == "q" and x[1] in todo]
+        said = [fixed.get(q) for q in qs if fixed.get(q)]
+        if len(qs) < 2 or len(set(said)) < 2:
+            continue
+        first = said[0]
+        narration = " ".join(x[1] for x in p["parts"] if x[0] == "n")
+        mentioned = {names[m.group(1)] for m in name_re.finditer(narration)} if name_re else set()
+        if not (mentioned - {first}):
+            for q in qs:
+                fixed[q] = first
+    return fixed
+
+
 def find_speakers(book_id: str, progress: Callable[[str], None] = lambda _: None) -> int:
     """Decide who speaks every untagged quote in the book, chapter by chapter. Returns lines changed.
 
@@ -465,6 +491,7 @@ def find_speakers(book_id: str, progress: Callable[[str], None] = lambda _: None
         if not todo:
             continue
         got = attribute_chapter(chapter, cast_text, names, ask_queued)
+        got = one_speaker_per_paragraph(chapter, got, todo, book["characters"])
         with store.lock(book_id):
             book = store.load(book_id)
             for seg in book["chapters"][ci]["segments"]:

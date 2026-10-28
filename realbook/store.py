@@ -202,7 +202,8 @@ def recast_all() -> None:
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
 PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
 CAST_VERSION = 4  # bump when voice descriptions or design settings change; prepare() re-casts every book
-SPEAKERS_VERSION = 3  # 2: pronouns ("She's") had become characters; 3: so had things ("the memory")
+SPEAKERS_VERSION = 4  # 2: pronouns ("She's") had become characters; 3: so had things ("the memory");
+#                       4: a paragraph's quotes split between speakers by the AI are joined again
 
 
 def _fake(name: str) -> bool:
@@ -211,6 +212,26 @@ def _fake(name: str) -> bool:
     if name.lower() in heuristic.PRONOUNS:
         return True
     return len(words) >= 2 and words[0] == "the" and not heuristic._is_person_noun(words[-1])
+
+
+def join_split_paragraphs(book: dict) -> bool:
+    """Apply "a new speaker starts a new paragraph" to speakers the local AI chose before that rule.
+    Lines set by hand are kept."""
+    from . import local_analyzer
+
+    changed = False
+    for ch in book["chapters"]:
+        mine = {s["q"] for s in ch["segments"] if s["kind"] == "dialogue" and s.get("by_hand")}
+        todo = local_analyzer.quotes_to_decide(ch) - mine
+        now = {s["q"]: s.get("speaker") for s in ch["segments"] if s["kind"] == "dialogue"}
+        fixed = local_analyzer.one_speaker_per_paragraph(ch, now, todo, book["characters"])
+        for s in ch["segments"]:
+            if s["kind"] == "dialogue" and fixed.get(s["q"]) != s.get("speaker") and s["q"] in todo:
+                s["speaker"] = fixed[s["q"]]
+                changed = True
+    if changed:
+        recount_lines(book)
+    return changed
 
 
 def fix_fake_characters(book: dict) -> bool:
@@ -311,7 +332,9 @@ def prepare() -> None:
         for s in list_books():
             book = load(s["id"])
             with lock(book["id"]):
-                if fix_fake_characters(book):
+                changed = fix_fake_characters(book)
+                changed = join_split_paragraphs(book) or changed
+                if changed:
                     save(book)
         values["speakers_version"] = SPEAKERS_VERSION
         save_settings(values)

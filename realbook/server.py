@@ -402,10 +402,19 @@ def analyze(book_id: str, req: AnalyzeRequest):
             try:
                 if not local_analyzer.installed():
                     local_analyzer.install(lambda msg: job.update(message=msg))
-                n = local_analyzer.find_speakers(book_id, progress=lambda msg: job.update(message=msg))
-                # With the corrected lines, the AI knows the characters better: describe them again.
                 import copy
 
+                if not any("other_names" in c for c in store.load(book_id)["characters"]):
+                    # Characters' other names ("the Reverend Mother") help it tell who "she" is.
+                    snapshot = copy.deepcopy(store.load(book_id))
+                    results = local_analyzer.profile_book(snapshot, local_analyzer.model_dir(),
+                                                          progress=lambda msg: job.update(message="First, " + msg[0].lower() + msg[1:]))
+                    with store.lock(book_id):
+                        book = store.load(book_id)
+                        local_analyzer.apply(book, results)
+                        store.save(book)
+                n = local_analyzer.find_speakers(book_id, progress=lambda msg: job.update(message=msg))
+                # With the corrected lines, the AI knows the characters better: describe them again.
                 snapshot = copy.deepcopy(store.load(book_id))
                 results = local_analyzer.profile_book(
                     snapshot, local_analyzer.model_dir(),
@@ -414,7 +423,7 @@ def analyze(book_id: str, req: AnalyzeRequest):
                     book = store.load(book_id)
                     local_analyzer.apply(book, results)
                     store.save(book)
-                job.update(state="done", message=f"Decided who speaks {n} untagged lines, and updated the descriptions")
+                job.update(state="done", message=f"Changed the speaker of {n} lines, and updated the descriptions")
             except Exception as e:  # surfaced to the UI
                 job.update(state="error", message=str(e))
 

@@ -117,6 +117,7 @@ def apply(book: dict, results: dict[str, dict]) -> int:
         for k in ("gender", "age", "accent", "pitch", "pace", "sound", "manner"):
             c[k] = p[k]
         c["not_person"] = not p["is_person"]
+        c["other_names"] = p.get("other_names", [])
         bits = [p["age"] if p["age"] != "adult" else "", p["gender"] if p["gender"] != "unknown" else "",
                 p["accent"].replace("_", " "), p["sound"]]
         c["summary"] = ", ".join(b for b in bits if b) + (f"; speaks {p['manner']}" if p["manner"] else "")
@@ -167,6 +168,23 @@ def _spread(items: list[str], n: int) -> list[str]:
     return head + [rest[int(i * step)] for i in range(n - len(head))]
 
 
+def _real_names(names: list[str], passages: list[str], char: dict) -> list[str]:
+    """Other names the model gave that the book really uses near this character (no inventions,
+    no pronouns or bare words like "the woman" that would match anyone)."""
+    from .heuristic import PRONOUNS, PERSON_WORDS
+
+    text = " ".join(passages)
+    out = []
+    for name in names:
+        name = name.strip(" \"'.,")
+        bare = re.sub(r"^(the|a|an)\s+", "", name, flags=re.I)
+        if (len(bare) < 3 or bare.lower() in PRONOUNS or bare.lower() in PERSON_WORDS
+                or name.lower() == char["name"].lower() or not re.search(r"\b%s\b" % re.escape(bare), text, re.I)):
+            continue
+        out.append(name[0].upper() + name[1:])
+    return list(dict.fromkeys(out))
+
+
 def _book_mentions_accent(accent: str, texts: list[str]) -> bool:
     from .heuristic import ACCENT_WORDS
 
@@ -187,12 +205,13 @@ Lines they speak:
 {lines}
 
 Reply with JSON only, no other text:
-{{"is_person": true or false, "gender": "male" | "female" | "unknown", "age": "child" | "young" | "adult" | "old", "accent": {accents}, "pitch": "low" | "medium" | "high", "pace": "slow" | "normal" | "fast", "sound": "<2 or 3 words>", "manner": "<a few words>"}}
+{{"is_person": true or false, "gender": "male" | "female" | "unknown", "age": "child" | "young" | "adult" | "old", "accent": {accents}, "pitch": "low" | "medium" | "high", "pace": "slow" | "normal" | "fast", "sound": "<2 or 3 words>", "manner": "<a few words>", "other_names": ["<name or title>", ...]}}
 
 - "is_person" is false if this "character" is really a group, an object, or a mistake (e.g. "The table", "Fremen").
 - Age: "child" under 13, "young" 13-29, "adult" 30-59, "old" 60 and over.
 - Accent: only if the passages say where the character is from or how they speak (e.g. "his Scottish brogue"). Otherwise "". Never assume British.
 - "sound": how this character's voice itself sounds, in 2 or 3 words of your own (for instance "gravelly, commanding", "bright, quick", "thin, nervous", "booming, jovial"). Do not use warm, soft, husky, rich, low, quiet, breathy or whisper.
+- "other_names": other names or titles the passages use for this same person (e.g. "the Reverend Mother", "the Duke", a surname), exactly as written in the book; [] if none.
 - "manner": how this character speaks, at most 8 words of your own (for instance "with clipped military precision", "in excited bursts", "with weary patience", "with sly amusement"). Describe this character specifically; don't just reuse these examples."""
 
 
@@ -222,6 +241,8 @@ def parse(reply: str) -> dict | None:
         "pitch": {"low": -1, "medium": 0, "high": 1}.get(data.get("pitch"), 0),
         "pace": {"slow": -1, "normal": 0, "fast": 1}.get(data.get("pace"), 0),
         "sound": _tidy(data.get("sound", ""), 4),
+        "other_names": [str(n).strip() for n in data.get("other_names", []) if isinstance(n, str)][:6]
+                       if isinstance(data.get("other_names"), list) else [],
         "manner": _tidy(data.get("manner", ""), 9),
     }
     out["manner"] = re.sub(r"^(speaking|speaks|talking)\s+", "", out["manner"], flags=re.I)
@@ -294,6 +315,8 @@ def profile_book(book: dict, path: Path, progress: Callable[[str], None] = lambd
         if profile and profile["accent"] and not _book_mentions_accent(profile["accent"], passages + lines):
             profile["accent"] = ""  # small models like to invent accents; keep only ones the book names
         if profile:
+            profile["other_names"] = _real_names(profile["other_names"], passages, char)
+        if profile:
             results[char["id"]] = profile
     designed._submit(designed.BACKGROUND, unload).result()
     return results
@@ -322,6 +345,7 @@ Passage:
 
 How to decide:
 - A speech tag ("said Paul", "she asked") names the speaker; "she"/"he" means the woman/man just mentioned.
+- The narration may call a character by a title or description that isn't in the list ("the Reverend Mother", "the Duke", "the boy"). Work out from the scene which listed character that is, and use their id.
 - A character whose action is described in the same paragraph as a quotation ("Paul nodded.", "Jessica turned to him.") is usually the one speaking it.
 - A name inside a quotation is usually the person being spoken TO ("You do not drool, Baron" is said to the Baron, not by him).
 - In a back-and-forth, speakers usually alternate, but one person often speaks several times in a row when the other only acts or stays silent.
@@ -367,7 +391,7 @@ def cast_list(book: dict, limit: int = 45) -> tuple[str, dict[str, str]]:
     cast = [c for c in sorted(book["characters"], key=lambda c: -c.get("lines", 0)) if not c.get("not_person")][:limit]
     lines, names = [], {}
     for c in cast:
-        aka = [a for a in c.get("aliases", []) if a != c["name"]][:3]
+        aka = list(dict.fromkeys(c.get("other_names", []) + [a for a in c.get("aliases", []) if a != c["name"]]))[:4]
         lines.append(f'- {c["id"]}: {c["name"]}' + (f' (also: {", ".join(aka)})' if aka else ""))
         names[c["id"]] = c["name"]
     return "\n".join(lines), names
@@ -402,14 +426,19 @@ def attribute_chapter(chapter: dict, cast_text: str, names: dict[str, str], ask_
     return speakers
 
 
-def untagged_quotes(chapter: dict) -> set[int]:
-    """Quotes whose paragraph has no speech tag ("said Paul", "she asked", "the old man said")."""
-    from .heuristic import TAG_AFTER, TAG_BEFORE, TAG_NOMINAL, TAG_PRONOUN
+def quotes_to_decide(chapter: dict) -> set[int]:
+    """Quotes whose speaker isn't named by a tag: no tag at all, or only "she said" / "he asked".
+
+    Rules work out "she" as the woman named last, which goes wrong when she's named differently
+    ("the Reverend Mother" for "the old woman"); with characters' other names the AI does better.
+    Tags that name the speaker ("said Paul", "the old man said") are left to the rules.
+    """
+    from .heuristic import TAG_AFTER, TAG_BEFORE, TAG_NOMINAL
 
     out = set()
     for p in paragraphs(chapter):
         narration = " ".join(x[1] for x in p["parts"] if x[0] == "n")
-        if not any(rx.search(narration) for rx in (TAG_AFTER, TAG_BEFORE, TAG_PRONOUN, TAG_NOMINAL)):
+        if not any(rx.search(narration) for rx in (TAG_AFTER, TAG_BEFORE, TAG_NOMINAL)):
             out |= {x[1] for x in p["parts"] if x[0] == "q"}
     return out
 
@@ -417,9 +446,9 @@ def untagged_quotes(chapter: dict) -> set[int]:
 def find_speakers(book_id: str, progress: Callable[[str], None] = lambda _: None) -> int:
     """Decide who speaks every untagged quote in the book, chapter by chapter. Returns lines changed.
 
-    Lines with a speech tag keep the free analyzer's answer (it's right on those), and lines you
-    assigned by hand are never touched. Each request waits its turn behind lines being read aloud.
-    On two hand-labelled Dune chapters this got 92% of untagged lines right (the free analyzer 66%).
+    Lines whose tag names the speaker keep the free analyzer's answer (it's right on those), and
+    lines you assigned by hand are never touched. Each request waits its turn behind lines being
+    read aloud. On two hand-labelled Dune chapters: 96% of all lines right (rules alone: 89%).
     """
     import copy
 
@@ -432,7 +461,7 @@ def find_speakers(book_id: str, progress: Callable[[str], None] = lambda _: None
     for n, ci in enumerate(chapters, 1):
         progress(f"Working out who speaks… chapter {n} of {len(chapters)}")
         chapter = copy.deepcopy(store.load(book_id)["chapters"][ci])
-        todo = untagged_quotes(chapter)
+        todo = quotes_to_decide(chapter)
         if not todo:
             continue
         got = attribute_chapter(chapter, cast_text, names, ask_queued)

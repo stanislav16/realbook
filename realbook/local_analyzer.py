@@ -112,8 +112,13 @@ def apply(book: dict, results: dict[str, dict]) -> int:
         p = results.get(c["id"])
         if not p:
             continue
-        for k in ("gender", "age", "accent", "pitch", "pace", "sound", "manner"):
+        # Run again, the model can word a character differently (its input changes when speakers
+        # are fixed), and new words mean a new voice. Keep the voice unless the basics changed.
+        keep_voice = c.get("profiled_by") == "local-ai" and all(c.get(k) == p[k] for k in ("gender", "age", "accent"))
+        for k in ("gender", "age", "accent") if keep_voice else ("gender", "age", "accent", "pitch", "pace", "sound", "manner"):
             c[k] = p[k]
+        if keep_voice:
+            p = {**p, "sound": c.get("sound", ""), "manner": c.get("manner", "")}
         c["not_person"] = not p["is_person"]
         bits = [p["age"] if p["age"] != "adult" else "", p["gender"] if p["gender"] != "unknown" else "",
                 p["accent"].replace("_", " "), p["sound"]]
@@ -229,8 +234,12 @@ def parse(reply: str) -> dict | None:
 
 
 def _tidy(text, max_words: int) -> str:
-    """Words safe to put in a voice description: no darkening words, no accent, no "voice"."""
-    text = DARK_WORDS.sub("", str(text))
+    """Words safe to put in a voice description: no darkening words, no accent, no "voice".
+
+    A phrase containing a darkening word is dropped whole; cutting just the word out of
+    "with sharp, quiet transitions" leaves "with sharp then transitions".
+    """
+    text = ", ".join(part for part in str(text).split(",") if not DARK_WORDS.search(part))
     text = re.sub(r"\b(\w+ accent|[\w-]*accent\w*|voice|voiced|tone|masculine|feminine)\b", "", text, flags=re.I)
     text = re.sub(r"\s*,\s*(,\s*)+", ", ", re.sub(r"\s{2,}", " ", text)).strip(" ,.;")
     return " ".join(text.split()[:max_words]).strip(" ,.;").lower()

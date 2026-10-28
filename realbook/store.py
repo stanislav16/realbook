@@ -201,6 +201,7 @@ def recast_all() -> None:
 
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
 PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
+CAST_VERSION = 2  # bump when voice descriptions or design settings change; prepare() re-casts every book
 
 
 def reprofile(book: dict) -> None:
@@ -269,6 +270,10 @@ def prepare() -> None:
                     reprofile(book)
                     save(book)
         values["profile_version"] = PROFILE_VERSION
+        save_settings(values)
+    if values.get("cast_version", 1) < CAST_VERSION:
+        recast_all()  # voices you picked by hand are kept
+        values["cast_version"] = CAST_VERSION
         save_settings(values)
     if values.get("segments_version", 1) >= SEGMENTS_VERSION:
         return

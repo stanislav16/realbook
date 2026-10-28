@@ -49,8 +49,11 @@ NARRATOR_DESCRIPTION = ("An adult woman with a bright, clear voice and a neutral
 REFERENCE_TEXT = ("I have been thinking about it all morning, and I suppose there is no better time to tell you. "
                   "Some things are easier to say out loud than to keep to yourself.")
 ACCENT_WORDS = {"south_african": "South African"}
-TIMBRES = ["bright", "smooth", "clear", "expressive", "crisp", "lively", "natural", "slightly raspy"]
-DARK_ROLLOFF_HZ = 1200  # a designed voice with 95% of its sound below this is muffled; design it again
+TIMBRES = ["bright", "clear", "expressive", "lively", "crisp", "slightly raspy"]
+# Every new voice is checked: muffled (95% of its sound below this), or a man who sounds like a woman
+# or the other way round, and it's designed again. Up to DESIGN_ATTEMPTS tries; the best one is kept.
+CLEAR_ROLLOFF_HZ = 1500
+MALE_MAX_PITCH_HZ, FEMALE_MIN_PITCH_HZ = 160, 165
 DESIGN_ATTEMPTS = 3
 
 # Files the Qwen models share byte for byte (tokenizers and the audio codec).
@@ -79,6 +82,7 @@ class Engine:
     read: Callable  # (model, text, reference clip) -> generator of audio chunks
     licence_note: str = ""
     speed_note: str = ""
+    design_version: int = 1  # bump when design settings change, so voices are designed again
     install: dict = field(default_factory=lambda: {"state": "idle", "progress": 0.0, "message": ""})
 
     def files(self) -> list[tuple[str, str, str, int, str]]:
@@ -133,8 +137,11 @@ BREEZE = Engine(
         }),
     },
     design_role="model", read_role="model",
-    design=lambda m, description: m.generate(text=REFERENCE_TEXT, instruct=description, cfg_scale=4.0),
+    # Following the description strictly (Breeze's suggested 4) makes voices muffled and "underwater";
+    # 1.5 is clear and, with gender stated in the description, still follows it.
+    design=lambda m, description: m.generate(text=REFERENCE_TEXT, instruct=description, cfg_scale=1.5),
     read=lambda m, text, ref: m.generate(text=text, ref_audio=str(ref), ref_text=REFERENCE_TEXT),
+    design_version=2,  # 2: strictness 1.5 and the quality check
     licence_note=("Breeze-TTS-2's licence allows research and non-commercial use only: fine for listening to "
                   "your own books, but don't sell or publish what it makes."),
     speed_note="About as fast as listening on a recent Mac, so playback faster than 1× may pause between lines.",
@@ -271,22 +278,35 @@ def describe_character(char: dict) -> str:
         return char["voice_description"]
     gender, age = char.get("gender", "unknown"), char.get("age", "adult")
     who = {
-        ("male", "child"): "A young boy, about ten years old,", ("female", "child"): "A young girl, about ten years old,",
+        ("male", "child"): "A ten-year-old boy", ("female", "child"): "A ten-year-old girl",
         ("male", "young"): "A young man in his twenties", ("female", "young"): "A young woman in her twenties",
-        ("male", "adult"): "A grown man", ("female", "adult"): "A grown woman",
+        ("male", "adult"): "An adult man", ("female", "adult"): "An adult woman",
         ("male", "old"): "An old man in his seventies", ("female", "old"): "An old woman in her seventies",
     }.get((gender, age)) or {"child": "A child", "young": "A young adult", "old": "An elderly person"}.get(age, "An adult")
     pitch = char.get("pitch", 0)
     # Unremarkable voices get a timbre of their own, so two plain characters don't sound alike.
     timbre = TIMBRES[int(hashlib.sha1(char["id"].encode()).hexdigest(), 16) % len(TIMBRES)]
-    voice = {-1: f"a deep, {timbre} voice", 1: "a high, light voice"}.get(pitch, f"a {timbre} voice")
+    # Saying "masculine" keeps men from sounding high and soft; "feminine" darkens women's voices,
+    # so they get "clear" instead.
+    if age == "child" and timbre == "slightly raspy":
+        timbre = "lively"
+    if gender == "male":
+        if timbre == "bright":  # makes men's voices higher
+            timbre = "clear"
+        quality = "boyish" if age == "child" else "masculine"
+        voice = {-1: f"deep, {quality}", 1: f"high, {quality}"}.get(pitch, f"{timbre}, {quality}")
+    else:
+        voice = {-1: "deep, clear", 1: "high, clear"}.get(pitch, f"{timbre}, clear" if timbre != "clear" else "bright, clear")
+    voice = f"{'an' if voice[0] in 'aeiou' else 'a'} {voice} voice"
+    if gender == "male" and age == "old" and pitch != -1:
+        voice += ", a little gravelly with age,"  # keeps old men's voices low without muffling them
     accent = char.get("accent", "")
-    text = f"{who} with {voice}"
+    text = f"{who} with {voice}".rstrip(",")
     if accent:
         word = ACCENT_WORDS.get(accent, accent.title())
-        text += f" and {'an' if word[0] in 'AEIOU' else 'a'} {word} accent"
+        text = f"{who} with {voice} and {'an' if word[0] in 'AEIOU' else 'a'} {word} accent"
+    text += {-1: ", speaking slowly and deliberately", 1: ", speaking quickly and energetically"}.get(char.get("pace", 0), "")
     text += "."
-    text += {-1: " Speaks slowly and deliberately.", 1: " Speaks quickly and energetically."}.get(char.get("pace", 0), "")
     summary = (char.get("summary") or "").strip()
     if summary.endswith(".") and len(summary.split()) > 5:  # Claude writes a sentence on how they sound
         text += " " + summary
@@ -295,7 +315,8 @@ def describe_character(char: dict) -> str:
 
 def voice_for(engine: Engine, description: str, seed: str = "", take: int = 0) -> str:
     """The voice name for a description; the clip itself is designed the first time it's spoken."""
-    key = hashlib.sha1(f"{seed}|{take}|{description}".encode()).hexdigest()[:16]
+    version = f"|v{engine.design_version}" if engine.design_version > 1 else ""
+    key = hashlib.sha1(f"{seed}|{take}|{description}{version}".encode()).hexdigest()[:16]
     path = voices_dir(engine) / f"{key}.json"
     if not path.exists():
         voices_dir(engine).mkdir(parents=True, exist_ok=True)
@@ -403,6 +424,48 @@ def _generate(gen) -> np.ndarray:
     return np.clip(np.array(audio, dtype=np.float32).ravel(), -1, 1)
 
 
+def _quality(samples: np.ndarray, description: str) -> tuple[float, bool]:
+    """(score, good enough): clarity, minus a penalty that grows the further the pitch is from the gender's.
+
+    A slightly-too-high man still beats a muffled one; a man who sounds like a woman doesn't.
+    """
+    import re
+
+    rolloff, pitch = _rolloff(samples), _pitch(samples)
+    words = description.lower()
+    # Boys and girls have high voices anyway; only grown men are checked for sounding too high.
+    off = 0.0
+    if re.search(r"\b(man|gentleman)\b", words):
+        off = max(0.0, pitch - MALE_MAX_PITCH_HZ)
+    elif re.search(r"\b(woman|girl)\b", words) and pitch:
+        off = max(0.0, FEMALE_MIN_PITCH_HZ - pitch)
+    score = min(rolloff, 3000.0) - 15 * off  # past 3 kHz a voice is clear enough; don't trade pitch for more
+    return score, rolloff >= CLEAR_ROLLOFF_HZ and off == 0
+
+
+def _pitch(samples: np.ndarray) -> float:
+    """Median speaking pitch in Hz, from voiced 40 ms frames (0 if none found)."""
+    n, hop = int(0.04 * SAMPLE_RATE), int(0.01 * SAMPLE_RATE)
+    lo, hi = SAMPLE_RATE // 400, SAMPLE_RATE // 60
+    frames = [samples[i:i + n] for i in range(0, len(samples) - n, hop)]
+    if not frames:
+        return 0.0
+    energy = np.array([np.sqrt(np.mean(f ** 2)) for f in frames])
+    floor = 0.3 * np.median(energy[energy > 0]) if np.any(energy > 0) else 0
+    found = []
+    for f, e in zip(frames, energy):
+        if e < floor:
+            continue
+        f = f - f.mean()
+        ac = np.correlate(f, f, "full")[n - 1:]
+        if ac[0] <= 0:
+            continue
+        lag = lo + int(np.argmax(ac[lo:hi]))
+        if ac[lag] / ac[0] > 0.45:  # clearly periodic: a voiced sound
+            found.append(SAMPLE_RATE / lag)
+    return float(np.median(found)) if found else 0.0
+
+
 def _rolloff(samples: np.ndarray) -> float:
     """The frequency below which 95% of the sound's energy lies; low means muffled."""
     power = np.abs(np.fft.rfft(samples)) ** 2
@@ -425,14 +488,15 @@ def _design(engine: Engine, key: str) -> Path:
     if ref.exists():
         return ref
     info = json.loads((voices_dir(engine) / f"{key}.json").read_text())
-    # Designing is random: now and then a voice comes out muffled. Try again, and keep the clearest.
-    best, best_rolloff = None, -1.0
+    # Designing is random: now and then a voice comes out muffled, or a man sounds like a woman.
+    # Try again, and keep the best.
+    best, best_score = None, float("-inf")
     for _ in range(DESIGN_ATTEMPTS):
         samples = _generate(engine.design(_model(engine, engine.design_role), info["description"]))
-        rolloff = _rolloff(samples)
-        if rolloff > best_rolloff:
-            best, best_rolloff = samples, rolloff
-        if rolloff >= DARK_ROLLOFF_HZ:
+        score, good = _quality(samples, info["description"])
+        if score > best_score:
+            best, best_score = samples, score
+        if good:
             break
     samples = best
     _last_design = time.monotonic()

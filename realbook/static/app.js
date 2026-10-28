@@ -739,10 +739,58 @@ function castMenu(anchor) {
   popupMenu(anchor, [
     S.config.local_ai?.supported ? { label: "Describe Characters with Local AI…", disabled: busy, note: doneNote("describe"), action: () => analyze("local") } : null,
     S.config.local_ai?.supported ? { label: "Find Speakers with Local AI…", disabled: busy, note: doneNote("speakers"), action: () => analyze("local-speakers") } : null,
+    "-",
+    { label: "Export for AI Review…", disabled: busy, action: () => exportReview() },
+    { label: "Import AI Review…", disabled: busy, note: doneNote("review"), action: () => importReview() },
     { label: S.config.claude ? "Analyze with Claude…" : "Analyze with Claude (add a key in Settings)", disabled: busy || !S.config.claude, action: () => analyze("claude") },
     "-",
     { label: "Add Character…", action: () => newCharacter() },
   ]);
+}
+
+// A package a stronger AI chat (e.g. Claude) can check: every line marked with its id and speaker.
+async function exportReview() {
+  const b = S.book;
+  const native = !!window.pywebview;
+  const go = await ask({
+    title: "Export for AI review", ok: native ? "Save to Downloads" : "Download",
+    body: el("div", { class: "review-steps" },
+      el("p", { class: "muted" }, "Have a stronger AI, like Claude, check who says each line and how each character should sound. RealBook makes a ZIP with the book split into parts, each with its own instructions."),
+      el("ol", {},
+        el("li", {}, "Unzip it, open a chat at ", el("b", {}, "claude.ai"), " (or another strong AI) and drag in ", el("b", {}, "Part 1"), ". No need to type anything; the file explains the task."),
+        el("li", {}, "The AI answers with a block of corrections. Copy its whole reply."),
+        el("li", {}, "Here: Cast ••• → ", el("b", {}, "Import AI Review…"), " → paste → Import."),
+        el("li", {}, "Repeat for each part, best in a new chat each time.")),
+      el("p", { class: "muted small" }, "Corrected lines are protected like lines you fix by hand; the local AI won't change them later.")),
+  });
+  if (!go) return;
+  if (native) {
+    try {
+      const r = await api(`/api/books/${b.id}/review/save`, { method: "POST" });
+      toast(`Saved to Downloads (${r.parts} part${r.parts === 1 ? "" : "s"})`, 5000);
+    } catch (e) { toast(e.message); }
+  } else {
+    const a = el("a", { href: `/api/books/${b.id}/review/export`, download: "" });
+    document.body.append(a); a.click(); a.remove();
+  }
+}
+
+async function importReview() {
+  const b = S.book;
+  const area = el("textarea", { class: "design-text review-paste", rows: 10, spellcheck: "false",
+    placeholder: "Paste the AI's whole reply here, including the ```json block." });
+  const text = await ask({ title: "Import AI review", ok: "Import", body: el("div", {},
+    el("p", { class: "muted" }, "Paste the reply from the AI chat for one part of this book's review."), area) });
+  if (!text || !area.value.trim()) return;
+  try {
+    const r = await api(`/api/books/${b.id}/review/import`, { method: "POST", json: { text: area.value } });
+    b.cast = r.cast; b.narrator = r.narrator;
+    b.ai_done = { ...(b.ai_done || {}), review: Date.now() / 1000 };
+    S.chapter = await api(`/api/books/${b.id}/chapters/${S.chapterIdx}`);
+    voicesChanged(); renderCast(); renderPage(); highlight();
+    const bits = [r.speakers && `${r.speakers} speakers`, r.characters && `${r.characters} characters`, r.added && `${r.added} new`, r.merged && `${r.merged} merged`].filter(Boolean);
+    toast(`Review imported: ${bits.join(", ") || "nothing to change"}${r.skipped_count ? ` (${r.skipped_count} entries didn't match the book and were skipped)` : ""}`, 6000);
+  } catch (e) { toast(e.message, 6000); }
 }
 
 function characterMenu(anchor, c) {

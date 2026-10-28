@@ -332,8 +332,9 @@ def describe_character(char: dict) -> str:
         text = f"{who} with {voice} and {'an' if word[0] in 'AEIOU' else 'a'} {word} accent"
     manner = char.get("manner", "")
     if manner:
-        speed = {-1: "slowly ", 1: "quickly "}.get(char.get("pace", 0), "")
-        text += f", speaking {speed}{manner}"
+        speed = {-1: "slowly", 1: "quickly"}.get(char.get("pace", 0), "")
+        joint = ", " if re.match(r"\w+ly\b", manner) else " "  # "slowly, calmly and exactly"
+        text += f", speaking {speed + joint if speed else ''}{manner}"
     else:
         text += {-1: ", speaking slowly and deliberately", 1: ", speaking quickly and energetically"}.get(char.get("pace", 0), "")
     text += "."

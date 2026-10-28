@@ -1,6 +1,6 @@
 [project]
 name = "realbook"
-version = "0.9.7"
+version = "0.9.8"
 description = "Read books aloud with a distinct voice for every character."
 readme = "README.md"
 requires-python = ">=3.11"

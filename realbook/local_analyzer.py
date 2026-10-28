@@ -110,7 +110,7 @@ def apply(book: dict, results: dict[str, dict]) -> int:
     changed = 0
     for c in book["characters"]:
         p = results.get(c["id"])
-        if not p:
+        if not p or c.get("profiled_by") == "review":  # a stronger AI's review isn't overwritten
             continue
         # Always the latest reading (e.g. with speakers corrected): a changed description gets a new
         # voice. Voices the user kept (pinned) stay, and so do descriptions they wrote themselves.
@@ -246,7 +246,7 @@ def parse(reply: str) -> dict | None:
         "manner": _tidy(data.get("manner", ""), 9),
     }
     out["manner"] = re.sub(r"^(speaking|speaks|talking)\s+", "", out["manner"], flags=re.I)
-    if out["manner"] and not re.match(r"(with|in|like|as if|quickly|slowly)\b", out["manner"]):
+    if out["manner"] and not re.match(r"(with|in|like|as if|\w+ly)\b", out["manner"]):
         out["manner"] = f"with {out['manner']}"  # reads as "speaking with calm authority"
     return out
 

@@ -57,7 +57,7 @@ def authorised(key: str | None) -> bool:
 
 
 def blocked(method: str, path: str) -> bool:
-    return (method, path) in BLOCKED or path.endswith("/export/reveal")
+    return (method, path) in BLOCKED or path.endswith("/export/reveal") or path.endswith("/review/save")
 
 
 def status() -> dict:

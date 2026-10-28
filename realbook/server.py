@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
+import urllib.parse
 import webbrowser
 from pathlib import Path
 
@@ -14,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import claude_analyzer, export, heuristic, kokoro_tts, local_analyzer, model_finder, designed, remote, store, system, tts, voices
+from . import claude_analyzer, export, heuristic, review, kokoro_tts, local_analyzer, model_finder, designed, remote, store, system, tts, voices
 
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="RealBook")
@@ -531,6 +533,48 @@ def analyze(book_id: str, req: AnalyzeRequest):
     jobs[book_id] = {"state": "running", "message": "Starting…", "engine": req.engine}
     threading.Thread(target=run, daemon=True).start()
     return jobs[book_id]
+
+
+# -------------------------------------------------------------- AI review
+
+
+@app.get("/api/books/{book_id}/review/export")
+def review_export(book_id: str):
+    """A ZIP for a stronger AI chat to check speakers and characters (see realbook/review.py)."""
+    from fastapi.responses import Response
+
+    b = _book(book_id)
+    name = re.sub(r'[\\/:*?"<>|]+', " ", b["title"]).strip()[:60] or "Book"
+    return Response(review.zip_bytes(b), media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename*=utf-8''{urllib.parse.quote(name + ' - RealBook review.zip')}"})
+
+
+@app.post("/api/books/{book_id}/review/save")
+def review_save(book_id: str):
+    """Save the review ZIP to Downloads and show it in Finder (the app has no download bar)."""
+    b = _book(book_id)
+    name = re.sub(r'[\\/:*?"<>|]+', " ", b["title"]).strip()[:60] or "Book"
+    path = Path.home() / "Downloads" / f"{name} - RealBook review.zip"
+    path.write_bytes(review.zip_bytes(b))
+    system.reveal(path)
+    return {"path": str(path), "parts": len(review.parts(b))}
+
+
+class ReviewImport(BaseModel):
+    text: str
+
+
+@app.post("/api/books/{book_id}/review/import")
+def review_import(book_id: str, r: ReviewImport):
+    """Apply a stronger AI's corrections, pasted from the chat."""
+    b = _book(book_id)
+    with store.lock(book_id):
+        try:
+            result = review.apply(b, r.text)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        store.save(b)
+    return {**result, "cast": b["characters"], "narrator": b["narrator"]}
 
 
 # ----------------------------------------------------------------- export

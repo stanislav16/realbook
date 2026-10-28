@@ -71,7 +71,7 @@ def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: i
         voice = system.default_voice()  # natural voices were removed; keep reading with a system voice
     if not (designed.supports(voice, style) or (style == "quiet" and voice.startswith("kokoro:"))):
         style = ""  # same audio as usual, so the same cached file
-    key = hashlib.sha1(f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}{'|' + style if style else ''}".encode()).hexdigest()
+    key = hashlib.sha1(f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}{'|' + designed.style_tag(style) if style else ''}".encode()).hexdigest()
     out = cache_dir / f"{key}{system.AUDIO_EXT}"
     if out.exists():
         return out

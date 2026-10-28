@@ -605,6 +605,11 @@ class Style:
     # whispers the fingerprint by itself wasn't enough (Piter came out shouting); joined, a listening
     # test heard Jessica whisper in her own voice.
     join: bool = False
+    deep_ending: str = ""  # used instead of `ending` for voices described as deep
+    # Each line is checked against the usual voice: no more than MAX_PITCH_RISE higher, and the
+    # same speaker by fingerprint. A line that fails is made again, then read as usual.
+    check_line: bool = False
+    version: int = 1  # bump when the style's sample changes, so samples and lines are made again
 
 
 STYLES = {
@@ -612,11 +617,16 @@ STYLES = {
     # of it with a pitch (normal speech: ~75%).
     "quiet": Style(", whispering quietly and secretively.", QUIET_REFERENCE_TEXT, attempts=4,
                    score=lambda s, usual: 0.5 - _voiced(s), keep_voice=True, join=True),
-    "loud": Style(", shouting loudly and forcefully.", "Get out! Get out of here, all of you! Do you hear me? Run, now!",
-                  attempts=3, score=lambda s, usual: _loudness(s) - _loudness(usual) - 3, keep_voice=True),
+    # Shouting samples came out two to three times higher than the voice (the Baron's 90 Hz voice
+    # shouted at 300 Hz, like someone else): a sample must be at least 3 dB louder and at most
+    # 1.8 times higher, and deep voices are asked to bellow instead.
+    "loud": Style(", shouting loudly and forcefully.",
+                  "Enough! I will not be kept waiting. Bring him to me, now! Do you hear me? Now!",
+                  attempts=4, score=lambda s, usual: min(_loudness(s) - _loudness(usual) - 3, 10 * (1.8 - _pitch_rise(s, usual))),
+                  keep_voice=True, deep_ending=", bellowing angrily in a deep, booming voice.", check_line=True, version=2),
     "upset": Style(", speaking in a shaky, tearful, upset voice.",
                    "Please, please don't go. I can't do this without you. I'm so sorry, I never meant for any of this to happen.",
-                   keep_voice=True),
+                   keep_voice=True, check_line=True),
 }
 QUIET_DB = 6  # whispered lines are at least this much quieter than the voice's usual sample
 
@@ -624,7 +634,32 @@ QUIET_DB = 6  # whispered lines are at least this much quieter than the voice's 
 def style_description(description: str, style: str) -> str:
     """The same voice in another mood: "An adult woman with a clear, poised voice, whispering quietly and secretively." """
     first = description.split(". ")[0].split(", speaking")[0].rstrip(". ")
-    return first + STYLES[style].ending
+    how = STYLES[style]
+    return first + (how.deep_ending if how.deep_ending and re.search(r"\bdeep\b", first) else how.ending)
+
+
+def style_tag(style: str) -> str:
+    """`style` with its version, for naming samples and cached lines ("loud2")."""
+    version = STYLES[style].version if style in STYLES else 1
+    return style if version == 1 else f"{style}{version}"
+
+
+def _style_path(engine: Engine, key: str, style: str) -> Path:
+    return voices_dir(engine) / f"{key}-{style_tag(style)}.wav"
+
+
+MAX_PITCH_RISE = 1.7
+MIN_LIKENESS = 0.96
+
+
+def _median_pitch(samples: np.ndarray) -> float:
+    found = [p for p in (_pitch(samples[i:i + 2048]) for i in range(0, len(samples) - 2048, 1200)) if p > 0]
+    return float(np.median(found)) if found else 0.0
+
+
+def _pitch_rise(samples: np.ndarray, usual: np.ndarray) -> float:
+    base = _median_pitch(usual)
+    return _median_pitch(samples) / base if base else 1.0
 
 
 def supports(voice: str, style: str) -> bool:
@@ -650,7 +685,7 @@ def _read_wav(path: Path) -> np.ndarray:
 def _design_style(engine: Engine, key: str, style: str) -> Path:
     """The voice's sample for `style`, designed the first time a line needs it. Designing is random,
     so styles with a check try up to `attempts` times and keep the best."""
-    ref = voices_dir(engine) / f"{key}-{style}.wav"
+    ref = _style_path(engine, key, style)
     if not ref.exists():
         how = STYLES[style]
         description = style_description(json.loads((voices_dir(engine) / f"{key}.json").read_text())["description"], style)
@@ -686,13 +721,16 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
     if style in engine.styles:
         ref, ref_text = _design_style(engine, key, style), STYLES[style].text
         if STYLES[style].join and engine.fingerprint:
-            joined = voices_dir(engine) / f"{key}-{style}-joined.wav"
+            joined = voices_dir(engine) / f"{key}-{style_tag(style)}-joined.wav"
             if not joined.exists():
                 gap = np.zeros(int(0.4 * SAMPLE_RATE), np.float32)
                 _write_wav(joined, np.concatenate([_read_wav(usual), gap, _read_wav(ref)]))
             ref, ref_text = joined, f"{info.get('reference_text', CALM_REFERENCE_TEXT)} {ref_text}"
+    styled = style in engine.styles and STYLES[style].keep_voice and engine.fingerprint
+    usual_text = info.get("reference_text", CALM_REFERENCE_TEXT)
+
     def generate() -> np.ndarray:
-        if not (style in engine.styles and STYLES[style].keep_voice and engine.fingerprint):
+        if not styled:
             return _generate(engine.read(model, text, ref, ref_text))
         import mlx.core as mx
 
@@ -703,9 +741,32 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
         finally:
             model.extract_speaker_embedding = fingerprint
 
+    samples = generate()
+    if styled and STYLES[style].check_line:
+        # A shouted or upset line can still come out as someone else (higher, another accent): it's
+        # made again, and if it still isn't them, read in the usual voice.
+        import mlx.core as mx
+
+        usual_samples = _read_wav(usual)
+        print_of = lambda s: np.array(model.extract_speaker_embedding(mx.array(s))).ravel()
+        mine = print_of(usual_samples)
+
+        def same_person(s: np.ndarray) -> bool:
+            other = print_of(s)
+            likeness = float(other @ mine / (np.linalg.norm(other) * np.linalg.norm(mine) + 1e-9))
+            return _pitch_rise(s, usual_samples) <= MAX_PITCH_RISE and likeness >= MIN_LIKENESS
+
+        for _ in range(STYLE_RETRIES):
+            if same_person(samples):
+                break
+            samples = generate()
+        else:
+            if not same_person(samples):
+                styled, ref, ref_text = False, usual, usual_text
+                samples = generate()
+
     # About one line in six stops while its last sound is still going (the model ends a frame too
     # soon), which sounds clipped. Those are made again, up to twice, keeping the cleanest ending.
-    samples = generate()
     for _ in range(CUT_RETRIES):
         if _ending(samples) <= CUT_DB:
             break
@@ -722,6 +783,7 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
     system.encode(wav, out, SAMPLE_RATE)
 
 
+STYLE_RETRIES = 2
 CUT_RETRIES = 2
 CUT_DB = -30  # the last 20 ms louder than this (against the loudest 20 ms) means it stopped mid-sound
 FADE_IN_MS, FADE_OUT_MS, TAIL_MS = 5, 40, 40
@@ -775,7 +837,7 @@ def design_styles_ahead(wanted: list[tuple[str, str]]) -> None:
     """Design these (voice, style) samples in the background, before a whispered or shouted line needs one."""
     for name, style in wanted:
         engine = engine_of(name)
-        if (engine and style in engine.styles and not (voices_dir(engine) / f"{_key(name)}-{style}.wav").exists()
+        if (engine and style in engine.styles and not _style_path(engine, _key(name), style).exists()
                 and f"{name}-{style}" not in _queued_designs):
             _queued_designs.add(f"{name}-{style}")
             _submit(BACKGROUND, _style_in_background, engine, name, style)

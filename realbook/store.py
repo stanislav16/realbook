@@ -407,9 +407,13 @@ def spoken(book: dict, text: str) -> str:
     say = book.get("pronunciations") or {}
     if not say:
         return text
-    rx = re.compile(r"(?<![\w'’])(%s)(?![\w])" % "|".join(re.escape(w) for w in sorted(say, key=len, reverse=True)), re.IGNORECASE)
-    lower = {w.lower(): s for w, s in say.items()}
-    return rx.sub(lambda m: lower[m.group(1).lower()], text)
+    def key(w: str) -> str:
+        return w.lower().replace("’", "'")  # Muad'Dib and Muad’Dib are the same name
+
+    pattern = "|".join(re.escape(w).replace("’", "'").replace("'", "['’]") for w in sorted(say, key=len, reverse=True))
+    rx = re.compile(r"(?<![\w'’])(%s)(?![\w])" % pattern, re.IGNORECASE)
+    lower = {key(w): s for w, s in say.items()}
+    return rx.sub(lambda m: lower[key(m.group(1))], text)
 
 
 def voice_for(book: dict, seg: dict) -> dict:

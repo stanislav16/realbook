@@ -20,6 +20,7 @@ import json
 import os
 import platform
 import queue
+import re
 import shutil
 import subprocess
 import tempfile
@@ -288,28 +289,38 @@ def describe_character(char: dict) -> str:
         ("male", "old"): "An old man in his seventies", ("female", "old"): "An old woman in her seventies",
     }.get((gender, age)) or {"child": "A child", "young": "A young adult", "old": "An elderly person"}.get(age, "An adult")
     pitch = char.get("pitch", 0)
-    # Unremarkable voices get a timbre of their own, so two plain characters don't sound alike.
-    timbre = TIMBRES[int(hashlib.sha1(char["id"].encode()).hexdigest(), 16) % len(TIMBRES)]
+    # How the voice sounds: from the local AI's reading of the book when there is one; otherwise
+    # unremarkable voices get a timbre of their own, so two plain characters don't sound alike.
+    timbre = char.get("sound") or TIMBRES[int(hashlib.sha1(char["id"].encode()).hexdigest(), 16) % len(TIMBRES)]
     # Saying "masculine" keeps men from sounding high and soft; "feminine" darkens women's voices,
     # so they get "clear" instead.
     if age == "child" and timbre == "slightly raspy":
         timbre = "lively"
+    parts = {-1: ["deep"], 1: ["high"]}.get(pitch, [])
+    if char.get("sound") or not parts:  # deep/high voices from the free analyzer stay simple
+        parts.append(timbre)
     if gender == "male":
-        if timbre == "bright":  # makes men's voices higher
-            timbre = "clear"
-        quality = "boyish" if age == "child" else "masculine"
-        voice = {-1: f"deep, {quality}", 1: f"high, {quality}"}.get(pitch, f"{timbre}, {quality}")
-    else:
-        voice = {-1: "deep, clear", 1: "high, clear"}.get(pitch, f"{timbre}, clear" if timbre != "clear" else "bright, clear")
+        parts = [re.sub(r"\bbright\b", "clear", p) for p in parts]  # "bright" makes men's voices higher
+        parts.append("boyish" if age == "child" else "masculine")
+    elif "clear" not in " ".join(parts):
+        parts.append("clear")
+    elif parts == ["clear"]:
+        parts = ["bright", "clear"]
+    voice = ", ".join(dict.fromkeys(w.strip() for p in parts for w in p.split(",") if w.strip()))  # no "deep, deep"
     voice = f"{'an' if voice[0] in 'aeiou' else 'a'} {voice} voice"
-    if gender == "male" and age == "old" and pitch != -1:
+    if gender == "male" and age == "old" and pitch != -1 and "grav" not in timbre:
         voice += ", a little gravelly with age,"  # keeps old men's voices low without muffling them
     accent = char.get("accent", "")
     text = f"{who} with {voice}".rstrip(",")
     if accent:
         word = ACCENT_WORDS.get(accent, accent.title())
         text = f"{who} with {voice} and {'an' if word[0] in 'AEIOU' else 'a'} {word} accent"
-    text += {-1: ", speaking slowly and deliberately", 1: ", speaking quickly and energetically"}.get(char.get("pace", 0), "")
+    manner = char.get("manner", "")
+    if manner:
+        speed = {-1: "slowly ", 1: "quickly "}.get(char.get("pace", 0), "")
+        text += f", speaking {speed}{manner}"
+    else:
+        text += {-1: ", speaking slowly and deliberately", 1: ", speaking quickly and energetically"}.get(char.get("pace", 0), "")
     text += "."
     summary = (char.get("summary") or "").strip()
     if summary.endswith(".") and len(summary.split()) > 5:  # Claude writes a sentence on how they sound

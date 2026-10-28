@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import claude_analyzer, export, heuristic, kokoro_tts, model_finder, designed, remote, store, system, tts, voices
+from . import claude_analyzer, export, heuristic, kokoro_tts, local_analyzer, model_finder, designed, remote, store, system, tts, voices
 
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="RealBook")
@@ -75,6 +75,7 @@ def config(request: Request = None):
         "apple_for_accents": values.get("apple_for_accents", True),
         "kokoro": kokoro_tts.install_status(),
         **{name: designed.install_status(engine) for name, engine in designed.ENGINES.items()},
+        "local_ai": local_analyzer.status(),
         "appearance": values.get("appearance", {}),
         "hide_voice_banner": values.get("hide_voice_banner", False),
         # On another device, the UI hides what only works on the Mac.
@@ -378,7 +379,7 @@ def set_speaker(book_id: str, n: int, sid: int, sp: Speaker):
 
 
 class AnalyzeRequest(BaseModel):
-    engine: str  # "claude" | "heuristic"
+    engine: str  # "claude" | "heuristic" | "local" (profiles only, from a small model on this Mac)
 
 
 @app.post("/api/books/{book_id}/analyze")
@@ -388,6 +389,31 @@ def analyze(book_id: str, req: AnalyzeRequest):
         raise HTTPException(409, "Already analysing this book")
     if req.engine == "claude" and not claude_analyzer.available():
         raise HTTPException(400, "Add an Anthropic API key in Settings to use Claude")
+    if req.engine == "local" and not designed.supported():
+        raise HTTPException(400, "The local AI needs a Mac with Apple silicon")
+
+    if req.engine == "local":
+        def run_local():
+            job = jobs[book_id]
+            try:
+                if not local_analyzer.installed():
+                    local_analyzer.install(lambda msg: job.update(message=msg))
+                import copy
+
+                snapshot = copy.deepcopy(store.load(book_id))
+                results = local_analyzer.profile_book(snapshot, local_analyzer.model_dir(),
+                                                      progress=lambda msg: job.update(message=msg))
+                with store.lock(book_id):
+                    book = store.load(book_id)
+                    n = local_analyzer.apply(book, results)
+                    store.save(book)
+                job.update(state="done", message=f"Described {n} characters from what the book says about them")
+            except Exception as e:  # surfaced to the UI
+                job.update(state="error", message=str(e))
+
+        jobs[book_id] = {"state": "running", "message": "Starting…", "engine": "local"}
+        threading.Thread(target=run_local, daemon=True).start()
+        return jobs[book_id]
 
     def run():
         job = jobs[book_id]

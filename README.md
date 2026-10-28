@@ -75,6 +75,10 @@ uv run realbook-web   # the same UI in your browser at http://127.0.0.1:8765
 
 **Better Mac voices.** Apple's *Enhanced* and *Premium* voices sound much better than the default ones. Open **Settings** → **Open VoiceOver Utility**, then go to Speech → Voice → Customize… and download a few English voices. Pick the Premium version of each voice if there is one. To read entirely with Mac voices, choose "Mac system voices" in Settings.
 
+## Describing characters with a local AI
+
+The free analyzer guesses gender and age from words near a character's name, which goes wrong in long novels. In the Cast panel, ••• → **Describe Characters with Local AI…** has a small language model running on your Mac (Qwen3-4B, 2.3 GB, downloaded the first time; Apple silicon) read the passages about each of the 40 main characters and some of their lines. It decides gender, age, accent and how they sound ("gravelly, commanding", "with sly amusement"), and RealBook builds each voice description from that. Accents are only kept when the book mentions them. On Dune's 22 main characters it got every gender and 21 of 22 ages right (the free analyzer: 17 and 12). It takes a few seconds per character, and it changes only voices, never who says which line; voices and descriptions you set by hand are kept.
+
 ## Optional: Claude for character analysis
 
 The free analyzer is rule-based. On long novels with many characters, it will leave some lines unattributed or give them to the wrong person. Claude reads the whole book and does this much more accurately.
@@ -87,6 +91,7 @@ To use it, paste an Anthropic API key into **Settings** (gear icon). The key is 
 - `realbook/segmenter.py`: splits narration from dialogue
 - `realbook/heuristic.py`: free character discovery, profiling and quote attribution
 - `realbook/claude_analyzer.py`: the same job done by Claude
+- `realbook/local_analyzer.py`: character profiles from a small local language model (mlx-lm)
 - `realbook/voices.py`: system voice catalogue and casting
 - `realbook/kokoro_tts.py`: Kokoro model download, voice catalogue and synthesis
 - `realbook/designed.py`: designed-voice engines (Qwen3-TTS, Breeze-TTS-2): model download, voice descriptions, voice design and cloning (on one MLX worker thread)

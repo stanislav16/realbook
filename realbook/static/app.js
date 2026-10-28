@@ -696,7 +696,8 @@ function renderCast() {
         el("span", { class: "dot" }),
         el("span", { class: "char-name" }, c.name),
         el("span", { class: "char-lines" }, `${c.lines} line${c.lines === 1 ? "" : "s"}`)),
-      el("div", { class: "char-summary" }, c.summary && c.summary !== meta ? c.summary : meta || "no description found"),
+      el("div", { class: "char-summary" }, c.summary && c.summary !== meta ? c.summary : meta || "no description found",
+        c.not_person ? el("em", {}, " · probably not a person") : null),
       c.evidence?.length ? el("details", {}, el("summary", {}, "What the book says"), ...c.evidence.map((e) => el("blockquote", {}, e))) : null,
       ...voiceControls(c, c.id, async (s) => {
         Object.assign(c, await api(`/api/books/${b.id}/characters/${c.id}`, { method: "PUT", json: s }));
@@ -711,6 +712,7 @@ function castMenu(anchor) {
   const busy = S.book.job?.state === "running";
   popupMenu(anchor, [
     { label: "Find Characters Again", disabled: busy, action: () => analyze("heuristic") },
+    S.config.local_ai?.supported ? { label: "Describe Characters with Local AI…", disabled: busy, action: () => analyze("local") } : null,
     { label: S.config.claude ? "Analyze with Claude…" : "Analyze with Claude (add a key in Settings)", disabled: busy || !S.config.claude, action: () => analyze("claude") },
     "-",
     { label: "Add Character…", action: () => newCharacter() },
@@ -764,10 +766,14 @@ function showJob(job) {
 }
 
 async function analyze(engine) {
+  const ai = S.config.local_ai;
   const msg = engine === "claude"
     ? "Claude will read the whole book to describe each character and decide who says every line. This uses your Anthropic API credits (roughly $1–3 for a full novel). Speakers you fixed by hand will be replaced."
-    : "RealBook will look for the characters again with its built-in finder. Speakers you fixed by hand will be replaced.";
-  if (!(await ask({ title: engine === "claude" ? "Analyze with Claude" : "Find characters again", text: msg, ok: "Start" }))) return;
+    : engine === "local"
+      ? `A small AI model on this Mac (${ai.label}) reads what the book says about each of the main characters and decides their gender, age, accent and how they sound. Free and offline; it takes a few seconds per character. Who says which line stays as it is, and voices or descriptions you set by hand are kept.${ai.installed ? "" : ` The first time, it downloads the model (${(ai.bytes / 1e9).toFixed(1)} GB).`}`
+      : "RealBook will look for the characters again with its built-in finder. Speakers you fixed by hand will be replaced.";
+  const title = { claude: "Analyze with Claude", local: "Describe characters with local AI", heuristic: "Find characters again" }[engine];
+  if (!(await ask({ title, text: msg, ok: "Start" }))) return;
   try {
     S.book.job = await api(`/api/books/${S.book.id}/analyze`, { method: "POST", json: { engine } });
     showJob(S.book.job);
@@ -789,6 +795,7 @@ function pollJob() {
     if (b.job?.state !== "running") {
       clearInterval(S.pollTimer);
       if (b.job?.state === "done") {
+        S.config = await api("/api/config");  // e.g. the local AI model is now installed
         S.book = b;
         voicesChanged();
         await loadChapter(S.chapterIdx, S.segIdx);

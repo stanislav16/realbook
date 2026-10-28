@@ -665,24 +665,54 @@ QUIET_TAG = re.compile(
     r"|lowered (?:his|her|their) voice|in a (?:low|soft|hushed|quiet) voice|in a whisper)\b", re.IGNORECASE)
 QUIET_ADVERB = re.compile(r"\b(?:said|says|asked|asks|replied|answered|spoke|added|called)\b.{0,20}\b(?:softly|quietly)\b"
                           r"|\b(?:softly|quietly)\b.{0,6}\b(?:said|asked|replied|answered|spoke|added)\b", re.IGNORECASE)
+# Upset and shouting are verbs of speaking, so they count near the start of the tag ("Liam begs",
+# "the Baron roared", "He had to repeat his order, shouting"), not anywhere in a long sentence.
+def _speech_verb(bare: str, inflected: str) -> re.Pattern:
+    """A verb of speaking: any inflected form ("roared", "yells"), or the bare form after I/we/you/they
+    ("I shout"). A bare "shout" or "shriek" elsewhere is usually a noun ("Deigh's shriek of pain")."""
+    return re.compile(r"\b(?:%s)\b|\b(?:I|we|you|they)\s+(?:\w+ly\s+)?(?:%s)\b" % (inflected, bare), re.IGNORECASE)
+
+
+UPSET_VERB = _speech_verb("plead|beg|sob|weep|wail|whimper|stammer|stutter",
+                          r"plead(?:s|ed|ing)|pled|beg(?:s|ged|ging)|sob(?:s|bed|bing)|weep(?:s|ing)|wept|wail(?:s|ed|ing)"
+                          r"|whimper(?:s|ed|ing)|stammer(?:s|ed|ing)|stutter(?:s|ed|ing)")
+UPSET_VOICE = re.compile(r"\bvoice (?:breaks|broke|breaking|cracks|cracked|cracking|trembl\w*|shak\w*|shook|waver\w*|quaver\w*)\b"
+                         r"|\bthrough (?:his|her|their|my) tears\b", re.IGNORECASE)
+LOUD_VERB = _speech_verb("shout|yell|roar|scream|bellow|shriek|holler|cry out",
+                         r"shout(?:s|ed|ing)|yell(?:s|ed|ing)|roar(?:s|ed|ing)|scream(?:s|ed|ing)|bellow(?:s|ed|ing)"
+                         r"|shriek(?:s|ed|ing)|holler(?:s|ed|ing)|cr(?:ies|ied|ying) out")
+LOUD_VOICE = re.compile(r"\braised (?:his|her|their|my) voice\b|\bat the top of (?:his|her|their|my) lungs\b", re.IGNORECASE)
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
-def quiet_quotes(segments: list[dict]) -> set[int]:
-    """Quotes the narration says are whispered, muttered or said quietly (by `q`).
+def _tag_start(sentence: str) -> str:
+    return " ".join(sentence.split()[:8])
+
+
+def line_styles(segments: list[dict]) -> dict[int, str]:
+    """How the narration says quotes are spoken, by `q`: "quiet" (whispered, muttered), "upset"
+    (pleaded, sobbed, voice breaking) or "loud" (shouted, roared). Quotes not described are left out.
 
     Only the sentence touching the quote counts: "“It burns,” he whispered." or "She bent close,
     lowered her voice almost to a whisper. “You will feel pain…”" — not a whisper three sentences on.
     """
-    quiet = set()
+    styles: dict[int, str] = {}
     for i, seg in enumerate(segments):
         if seg["kind"] != "dialogue":
             continue
-        near = []
+        after = before = ""
         if i + 1 < len(segments) and segments[i + 1]["kind"] != "dialogue" and segments[i + 1]["para"] == seg["para"]:
-            near.append(_SENTENCE_END.split(segments[i + 1]["text"].strip(), 1)[0])
+            after = _SENTENCE_END.split(segments[i + 1]["text"].strip(), 1)[0]
         if i > 0 and segments[i - 1]["kind"] != "dialogue" and segments[i - 1]["para"] == seg["para"]:
-            near.append(_SENTENCE_END.split(segments[i - 1]["text"].strip())[-1])
+            before = _SENTENCE_END.split(segments[i - 1]["text"].strip())[-1]
+        near = [s for s in (after, before) if s]
         if any(QUIET_TAG.search(s) or QUIET_ADVERB.search(s) for s in near):
-            quiet.add(seg["q"])
-    return quiet
+            style = "quiet"
+        elif UPSET_VERB.search(_tag_start(after)) or any(UPSET_VOICE.search(s) for s in near):
+            style = "upset"
+        elif LOUD_VERB.search(_tag_start(after)) or any(LOUD_VOICE.search(s) for s in near):
+            style = "loud"
+        else:
+            continue
+        styles.setdefault(seg["q"], style)
+    return styles

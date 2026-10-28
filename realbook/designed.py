@@ -98,6 +98,7 @@ class Engine:
     # Re-design voices that come out muffled or the wrong pitch for their gender (Breeze needs this;
     # Qwen's voices are clear, and checking them only costs time).
     check_quality: bool = False
+    styles: tuple[str, ...] = ("quiet",)  # ways of speaking it can do (see STYLES)
     install: dict = field(default_factory=lambda: {"state": "idle", "progress": 0.0, "message": ""})
 
     def files(self) -> list[tuple[str, str, str, int, str]]:
@@ -130,6 +131,7 @@ QWEN = Engine(
     design=lambda m, description, text=REFERENCE_TEXT: m.generate_voice_design(text=text, instruct=description, language="English"),
     read=lambda m, text, ref, ref_text: m.generate(text=text, ref_audio=str(ref), ref_text=ref_text, lang_code="english"),
     design_version=3,  # 2: an expressive sample; 3: a moderate one
+    styles=("quiet", "loud", "upset"),
     speed_note="About twice as fast as listening on a recent Mac.",
 )
 
@@ -386,7 +388,8 @@ def prune(in_use: set[str]) -> int:
             if f"{engine.name}:{info.stem}" not in in_use:
                 info.unlink(missing_ok=True)
                 info.with_suffix(".wav").unlink(missing_ok=True)
-                info.with_name(f"{info.stem}-quiet.wav").unlink(missing_ok=True)
+                for styled in info.parent.glob(f"{info.stem}-*.wav"):
+                    styled.unlink(missing_ok=True)
                 removed += 1
     return removed
 
@@ -531,7 +534,7 @@ def _write_wav(path: Path, samples: np.ndarray) -> None:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
-        w.writeframes((samples * 32767).astype("<i2").tobytes())
+        w.writeframes((np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes())
 
 
 # Voices partway through their tries: key -> (best samples so far, its score, tries made).
@@ -592,15 +595,42 @@ def _design_in_background(engine: Engine, name: str) -> None:
         _submit(BACKGROUND, _design_in_background, engine, name)
 
 
-def quiet_description(description: str) -> str:
-    """The same voice, whispering: "An adult woman with a clear, poised voice, whispering quietly and secretively." """
-    first = description.split(". ")[0].split(", speaking")[0].rstrip(". ")
-    return f"{first}, whispering quietly and secretively."
+@dataclass(frozen=True)
+class Style:
+    """A way of speaking the narration asks for ("he whispered", "she shouted"), read from a second
+    sample of the voice's description designed that way: the clone copies a sample's energy."""
+    ending: str  # replaces the description's ", speaking …" part
+    text: str  # what the sample says, in that mood
+    attempts: int = 1
+    score: Callable | None = None  # (sample, usual sample) -> higher is better; tries stop once it's >= 0
+    # Keep the usual sample's speaker fingerprint and take only the delivery from the styled one:
+    # otherwise shouting or crying sounds like someone else (Qwen only).
+    keep_voice: bool = False
 
 
-QUIET_ATTEMPTS = 4
-QUIET_VOICED = 0.5  # a real whisper is mostly breath: at most half of it has a pitch (normal speech: ~75%)
+STYLES = {
+    # About half of whisper designs come out spoken: a real whisper is mostly breath, at most half
+    # of it with a pitch (normal speech: ~75%).
+    "quiet": Style(", whispering quietly and secretively.", QUIET_REFERENCE_TEXT, attempts=4,
+                   score=lambda s, usual: 0.5 - _voiced(s)),
+    "loud": Style(", shouting loudly and forcefully.", "Get out! Get out of here, all of you! Do you hear me? Run, now!",
+                  attempts=3, score=lambda s, usual: _loudness(s) - _loudness(usual) - 3, keep_voice=True),
+    "upset": Style(", speaking in a shaky, tearful, upset voice.",
+                   "Please, please don't go. I can't do this without you. I'm so sorry, I never meant for any of this to happen.",
+                   keep_voice=True),
+}
 QUIET_DB = 6  # whispered lines are at least this much quieter than the voice's usual sample
+
+
+def style_description(description: str, style: str) -> str:
+    """The same voice in another mood: "An adult woman with a clear, poised voice, whispering quietly and secretively." """
+    first = description.split(". ")[0].split(", speaking")[0].rstrip(". ")
+    return first + STYLES[style].ending
+
+
+def supports(voice: str, style: str) -> bool:
+    engine = engine_of(voice)
+    return bool(engine) and style in engine.styles
 
 
 def _voiced(samples: np.ndarray) -> float:
@@ -618,22 +648,21 @@ def _read_wav(path: Path) -> np.ndarray:
         return np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(np.float32) / 32768
 
 
-def _design_quiet(engine: Engine, key: str) -> Path:
-    """The voice's whispering sample, designed the first time a whispered line needs it.
-
-    Designing is random and about half the tries come out spoken rather than whispered, so it
-    tries up to QUIET_ATTEMPTS times for one that's mostly breath, keeping the most whispered.
-    """
-    ref = voices_dir(engine) / f"{key}-quiet.wav"
+def _design_style(engine: Engine, key: str, style: str) -> Path:
+    """The voice's sample for `style`, designed the first time a line needs it. Designing is random,
+    so styles with a check try up to `attempts` times and keep the best."""
+    ref = voices_dir(engine) / f"{key}-{style}.wav"
     if not ref.exists():
-        description = quiet_description(json.loads((voices_dir(engine) / f"{key}.json").read_text())["description"])
-        best, best_voiced = None, 2.0
-        for _ in range(QUIET_ATTEMPTS):
-            samples = _generate(engine.design(_model(engine, engine.design_role), description, QUIET_REFERENCE_TEXT))
-            voiced = _voiced(samples)
-            if voiced < best_voiced:
-                best, best_voiced = samples, voiced
-            if voiced <= QUIET_VOICED:
+        how = STYLES[style]
+        description = style_description(json.loads((voices_dir(engine) / f"{key}.json").read_text())["description"], style)
+        usual = _read_wav(_design(engine, key))
+        best, best_score = None, -1e9
+        for _ in range(how.attempts):
+            samples = _generate(engine.design(_model(engine, engine.design_role), description, how.text))
+            score = how.score(samples, usual) if how.score else 0.0
+            if score > best_score:
+                best, best_score = samples, score
+            if score >= 0:
                 break
         tmp = ref.with_suffix(".tmp.wav")
         _write_wav(tmp, best)
@@ -654,10 +683,21 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
     info = json.loads((voices_dir(engine) / f"{key}.json").read_text())
     ref_text = info.get("reference_text", CALM_REFERENCE_TEXT)  # voices made before samples were recorded with it
     usual = ref
-    if style == "quiet":
-        ref, ref_text = _design_quiet(engine, key), QUIET_REFERENCE_TEXT
-    samples = _generate(engine.read(_model(engine, engine.read_role), text, ref, ref_text))
-    if style == "quiet":
+    model = _model(engine, engine.read_role)
+    if style in engine.styles:
+        ref, ref_text = _design_style(engine, key, style), STYLES[style].text
+    if style in engine.styles and STYLES[style].keep_voice:
+        import mlx.core as mx
+
+        fingerprint = model.extract_speaker_embedding
+        model.extract_speaker_embedding = lambda audio, sr=24000: fingerprint(mx.array(_read_wav(usual)), sr)
+        try:
+            samples = _generate(engine.read(model, text, ref, ref_text))
+        finally:
+            model.extract_speaker_embedding = fingerprint
+    else:
+        samples = _generate(engine.read(model, text, ref, ref_text))
+    if style == "quiet" and style in engine.styles:
         over = _loudness(samples) - (_loudness(_read_wav(usual)) - QUIET_DB)
         if over > 0:
             samples = samples * 10 ** (-over / 20)
@@ -669,7 +709,7 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
 
 def synthesize(out: Path, text: str, voice: str, urgent: bool = True, style: str = "") -> None:
     """Render `text` in a designed voice to an audio file at `out` (designing the voice first if needed).
-    `style` "quiet" reads it from the voice's whispering sample."""
+    `style` ("quiet", "loud", "upset") reads it from the voice's sample designed that way."""
     global _last_line
     _last_line = time.monotonic()
     _submit(URGENT if urgent else PREFETCH, _speak, engine_of(voice), out, text, _key(voice), style).result()
@@ -680,23 +720,24 @@ def warm_up(engine: Engine) -> None:
     _submit(BACKGROUND, _model, engine, engine.read_role)
 
 
-def _quiet_in_background(engine: Engine, name: str) -> None:
+def _style_in_background(engine: Engine, name: str, style: str) -> None:
     if time.monotonic() - _last_line < QUIET_SECONDS:
-        threading.Timer(1.0, _submit, args=(BACKGROUND, _quiet_in_background, engine, name)).start()
+        threading.Timer(1.0, _submit, args=(BACKGROUND, _style_in_background, engine, name, style)).start()
         return
     try:
-        _design_quiet(engine, _key(name))
+        _design_style(engine, _key(name), style)
     finally:
-        _queued_designs.discard(name + "-quiet")
+        _queued_designs.discard(f"{name}-{style}")
 
 
-def design_quiet_ahead(voice_names: list[str]) -> None:
-    """Design these voices' whispering samples in the background, before a whispered line needs one."""
-    for name in voice_names:
+def design_styles_ahead(wanted: list[tuple[str, str]]) -> None:
+    """Design these (voice, style) samples in the background, before a whispered or shouted line needs one."""
+    for name, style in wanted:
         engine = engine_of(name)
-        if engine and not (voices_dir(engine) / f"{_key(name)}-quiet.wav").exists() and name + "-quiet" not in _queued_designs:
-            _queued_designs.add(name + "-quiet")
-            _submit(BACKGROUND, _quiet_in_background, engine, name)
+        if (engine and style in engine.styles and not (voices_dir(engine) / f"{_key(name)}-{style}.wav").exists()
+                and f"{name}-{style}" not in _queued_designs):
+            _queued_designs.add(f"{name}-{style}")
+            _submit(BACKGROUND, _style_in_background, engine, name, style)
 
 
 def design_ahead(voice_names: list[str]) -> None:

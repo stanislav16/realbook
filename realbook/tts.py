@@ -53,13 +53,16 @@ def _clean(text: str) -> str:
 
 def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: int, urgent: bool = True,
                style: str = "") -> Path:
-    """Render `text` to an audio file (once) and return its path. `style` "quiet" is for whispered lines."""
+    """Render `text` to an audio file (once) and return its path. `style` is how the narration says the
+    line is spoken ("quiet", "loud", "upset"); voices that can't do it read it as usual."""
     text = _clean(text)
     engine = designed.engine_of(voice)
     if engine and not designed.installed(engine):
         voice = "kokoro:af_heart"  # designed voices were removed; keep reading with the next best
     if voice.startswith("kokoro:") and not kokoro_tts.installed():
         voice = system.default_voice()  # natural voices were removed; keep reading with a system voice
+    if not (designed.supports(voice, style) or (style == "quiet" and voice.startswith("kokoro:"))):
+        style = ""  # same audio as usual, so the same cached file
     key = hashlib.sha1(f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}{'|' + style if style else ''}".encode()).hexdigest()
     out = cache_dir / f"{key}{system.AUDIO_EXT}"
     if out.exists():

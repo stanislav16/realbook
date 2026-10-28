@@ -369,6 +369,7 @@ def set_speaker(book_id: str, n: int, sid: int, sp: Speaker):
         for seg in ch["segments"]:
             if seg["kind"] == "dialogue" and seg["q"] == q:
                 seg["speaker"] = sp.speaker
+                seg["by_hand"] = True  # the local AI's speaker pass leaves these alone
                 changed.append(seg["id"])
         store.recount_lines(b)
         store.save(b)
@@ -389,8 +390,23 @@ def analyze(book_id: str, req: AnalyzeRequest):
         raise HTTPException(409, "Already analysing this book")
     if req.engine == "claude" and not claude_analyzer.available():
         raise HTTPException(400, "Add an Anthropic API key in Settings to use Claude")
-    if req.engine == "local" and not designed.supported():
+    if req.engine in ("local", "local-speakers") and not designed.supported():
         raise HTTPException(400, "The local AI needs a Mac with Apple silicon")
+
+    if req.engine == "local-speakers":
+        def run_speakers():
+            job = jobs[book_id]
+            try:
+                if not local_analyzer.installed():
+                    local_analyzer.install(lambda msg: job.update(message=msg))
+                n = local_analyzer.find_speakers(book_id, progress=lambda msg: job.update(message=msg))
+                job.update(state="done", message=f"Decided who speaks {n} lines that had no speech tag")
+            except Exception as e:  # surfaced to the UI
+                job.update(state="error", message=str(e))
+
+        jobs[book_id] = {"state": "running", "message": "Starting…", "engine": "local-speakers"}
+        threading.Thread(target=run_speakers, daemon=True).start()
+        return jobs[book_id]
 
     if req.engine == "local":
         def run_local():

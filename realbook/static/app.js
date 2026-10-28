@@ -713,6 +713,7 @@ function castMenu(anchor) {
   popupMenu(anchor, [
     { label: "Find Characters Again", disabled: busy, action: () => analyze("heuristic") },
     S.config.local_ai?.supported ? { label: "Describe Characters with Local AI…", disabled: busy, action: () => analyze("local") } : null,
+    S.config.local_ai?.supported ? { label: "Find Speakers with Local AI…", disabled: busy, action: () => analyze("local-speakers") } : null,
     { label: S.config.claude ? "Analyze with Claude…" : "Analyze with Claude (add a key in Settings)", disabled: busy || !S.config.claude, action: () => analyze("claude") },
     "-",
     { label: "Add Character…", action: () => newCharacter() },
@@ -771,8 +772,10 @@ async function analyze(engine) {
     ? "Claude will read the whole book to describe each character and decide who says every line. This uses your Anthropic API credits (roughly $1–3 for a full novel). Speakers you fixed by hand will be replaced."
     : engine === "local"
       ? `A small AI model on this Mac (${ai.label}) reads what the book says about each of the main characters and decides their gender, age, accent and how they sound. Free and offline; it takes a few seconds per character. Who says which line stays as it is, and voices or descriptions you set by hand are kept.${ai.installed ? "" : ` The first time, it downloads the model (${(ai.bytes / 1e9).toFixed(1)} GB).`}`
-      : "RealBook will look for the characters again with its built-in finder. Speakers you fixed by hand will be replaced.";
-  const title = { claude: "Analyze with Claude", local: "Describe characters with local AI", heuristic: "Find characters again" }[engine];
+      : engine === "local-speakers"
+        ? `The AI model on this Mac (${ai.label}) reads each scene and decides who speaks the lines that have no speech tag, where RealBook otherwise just guesses that speakers take turns. Lines with a tag ("said Paul") and lines you set by hand stay as they are. Free and offline; about a minute per busy chapter (around half an hour for a long novel), and you can keep listening meanwhile.${ai.installed ? "" : ` The first time, it downloads the model (${(ai.bytes / 1e9).toFixed(1)} GB).`}`
+        : "RealBook will look for the characters again with its built-in finder. Speakers you fixed by hand will be replaced.";
+  const title = { claude: "Analyze with Claude", local: "Describe characters with local AI", "local-speakers": "Find speakers with local AI", heuristic: "Find characters again" }[engine];
   if (!(await ask({ title, text: msg, ok: "Start" }))) return;
   try {
     S.book.job = await api(`/api/books/${S.book.id}/analyze`, { method: "POST", json: { engine } });

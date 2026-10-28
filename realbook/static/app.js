@@ -729,7 +729,6 @@ function renderCast() {
 function castMenu(anchor) {
   const busy = S.book.job?.state === "running";
   popupMenu(anchor, [
-    { label: "Find Characters Again", disabled: busy, action: () => analyze("heuristic") },
     S.config.local_ai?.supported ? { label: "Describe Characters with Local AI…", disabled: busy, action: () => analyze("local") } : null,
     S.config.local_ai?.supported ? { label: "Find Speakers with Local AI…", disabled: busy, action: () => analyze("local-speakers") } : null,
     { label: S.config.claude ? "Analyze with Claude…" : "Analyze with Claude (add a key in Settings)", disabled: busy || !S.config.claude, action: () => analyze("claude") },

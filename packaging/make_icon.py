@@ -7,13 +7,18 @@ from pathlib import Path
 
 from AppKit import (
     NSBezierPath,
+    NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
+    NSMakeSize,
+    NSShadow,
+    NSString,
     NSBitmapImageRep,
     NSColor,
     NSCompositingOperationSourceOver,
     NSGradient,
     NSGraphicsContext,
     NSImage,
-    NSImageSymbolConfiguration,
     NSMakeRect,
     NSPNGFileType,
 )
@@ -22,39 +27,39 @@ HERE = Path(__file__).resolve().parent
 SIZE = 1024
 
 
-def _symbol(name: str, points: float, color, center: tuple[float, float]) -> None:
-    config = NSImageSymbolConfiguration.configurationWithPointSize_weight_(points, 0.3)
-    config = config.configurationByApplyingConfiguration_(NSImageSymbolConfiguration.configurationWithHierarchicalColor_(color))
-    image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, None).imageWithSymbolConfiguration_(config)
-    w, h = image.size()
-    image.drawInRect_fromRect_operation_fraction_(
-        NSMakeRect(center[0] - w / 2, center[1] - h / 2, w, h), NSMakeRect(0, 0, 0, 0), NSCompositingOperationSourceOver, 1.0
-    )
+def _rgb(r: int, g: int, b: int, a: float = 1.0):
+    return NSColor.colorWithCalibratedRed_green_blue_alpha_(r / 255, g / 255, b / 255, a)
 
 
 def draw() -> NSBitmapImageRep:
+    """A bold serif opening quotation mark in ink on warm paper: books, and the voices in them."""
     rep = NSBitmapImageRep.alloc().initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel_(
         None, SIZE, SIZE, 8, 4, True, False, "NSCalibratedRGBColorSpace", 0, 0
     )
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.setCurrentContext_(NSGraphicsContext.graphicsContextWithBitmapImageRep_(rep))
 
-    # macOS icon grid: an 824pt rounded square centred in 1024.
+    # macOS icon grid: an 824pt rounded square centred in 1024, with a soft drop shadow.
     inset = 100
     shape = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
         NSMakeRect(inset, inset, SIZE - 2 * inset, SIZE - 2 * inset), 185, 185
     )
-    top = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.20, 0.27, 0.45, 1)
-    bottom = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.08, 0.11, 0.22, 1)
-    NSGradient.alloc().initWithStartingColor_endingColor_(bottom, top).drawInBezierPath_angle_(shape, 90)
+    shadow = NSShadow.alloc().init()
+    shadow.setShadowOffset_(NSMakeSize(0, -10))
+    shadow.setShadowBlurRadius_(28)
+    shadow.setShadowColor_(_rgb(0, 0, 0, 0.28))
+    NSGraphicsContext.saveGraphicsState()
+    shadow.set()
+    _rgb(250, 247, 240).setFill()
+    shape.fill()
+    NSGraphicsContext.restoreGraphicsState()
+    NSGradient.alloc().initWithStartingColor_endingColor_(_rgb(236, 230, 218), _rgb(250, 247, 240)).drawInBezierPath_angle_(shape, 90)
 
-    _symbol("book.closed.fill", 400, NSColor.colorWithCalibratedRed_green_blue_alpha_(0.97, 0.94, 0.88, 1), (SIZE / 2 - 50, SIZE / 2 + 10))
-
-    # A warm badge with a sound wave: the book is being read aloud.
-    orange = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.91, 0.50, 0.27, 1)
-    orange.setFill()
-    NSBezierPath.bezierPathWithOvalInRect_(NSMakeRect(560, 190, 270, 270)).fill()
-    _symbol("waveform", 150, NSColor.whiteColor(), (695, 325))
+    font = NSFont.fontWithName_size_("Georgia-Bold", 760) or NSFont.boldSystemFontOfSize_(760)
+    attrs = {NSFontAttributeName: font, NSForegroundColorAttributeName: _rgb(28, 27, 26)}
+    quote = NSString.stringWithString_("\u201c")
+    size = quote.sizeWithAttributes_(attrs)
+    quote.drawAtPoint_withAttributes_((SIZE / 2 + 6 - size.width / 2, SIZE / 2 - 150 - size.height / 2), attrs)
     NSGraphicsContext.restoreGraphicsState()
     return rep
 

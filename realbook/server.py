@@ -232,7 +232,14 @@ def get_book(book_id: str):
 
 @app.get("/api/books/{book_id}/chapters/{n}")
 def get_chapter(book_id: str, n: int):
-    return _chapter(_book(book_id), n)
+    b = _book(book_id)
+    ch = _chapter(b, n)
+    if voices.designed_engine():
+        # Whispered lines are read from a second, whispering sample: make those before they're reached.
+        quiet = heuristic.quiet_quotes(ch["segments"])
+        speakers = {s["speaker"] for s in ch["segments"] if s["kind"] == "dialogue" and s.get("speaker") and s["q"] in quiet}
+        designed.design_quiet_ahead([c["voice"] for c in b["characters"] if c["id"] in speakers])
+    return ch
 
 
 class Position(BaseModel):
@@ -650,7 +657,9 @@ def segment_audio(book_id: str, n: int, sid: int, prefetch: int = 0):
         raise HTTPException(404, "Segment not found")
     seg = ch["segments"][sid]
     v = store.voice_for(b, seg)
-    path = tts.synthesize(store.audio_dir(book_id), store.spoken(b, seg["text"]), v["voice"], v["rate"], v["pitch_shift"], urgent=not prefetch)
+    style = "quiet" if seg["kind"] == "dialogue" and seg.get("speaker") and seg["q"] in heuristic.quiet_quotes(ch["segments"]) else ""
+    path = tts.synthesize(store.audio_dir(book_id), store.spoken(b, seg["text"]), v["voice"], v["rate"], v["pitch_shift"],
+                          urgent=not prefetch, style=style)
     return FileResponse(path, media_type=system.AUDIO_TYPE, headers={"Cache-Control": "no-cache"})
 
 

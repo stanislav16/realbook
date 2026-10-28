@@ -655,3 +655,34 @@ def _export(c: _Char) -> dict:
         "evidence": c.evidence,
         "lines": c.lines,
     }
+
+
+# ---------------------------------------------------------------- how a line is said
+
+QUIET_TAG = re.compile(
+    r"\b(?:whisper(?:s|ed|ing)?|murmur(?:s|ed|ing)?|mutter(?:s|ed|ing)?|mumbl(?:e|es|ed|ing)|hiss(?:es|ed|ing)?"
+    r"|breathed(?!\s+(?:deep|in\b|out\b|heav|hard|again|a sigh))|under (?:his|her|their) breath"
+    r"|lowered (?:his|her|their) voice|in a (?:low|soft|hushed|quiet) voice|in a whisper)\b", re.IGNORECASE)
+QUIET_ADVERB = re.compile(r"\b(?:said|says|asked|asks|replied|answered|spoke|added|called)\b.{0,20}\b(?:softly|quietly)\b"
+                          r"|\b(?:softly|quietly)\b.{0,6}\b(?:said|asked|replied|answered|spoke|added)\b", re.IGNORECASE)
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def quiet_quotes(segments: list[dict]) -> set[int]:
+    """Quotes the narration says are whispered, muttered or said quietly (by `q`).
+
+    Only the sentence touching the quote counts: "“It burns,” he whispered." or "She bent close,
+    lowered her voice almost to a whisper. “You will feel pain…”" — not a whisper three sentences on.
+    """
+    quiet = set()
+    for i, seg in enumerate(segments):
+        if seg["kind"] != "dialogue":
+            continue
+        near = []
+        if i + 1 < len(segments) and segments[i + 1]["kind"] != "dialogue" and segments[i + 1]["para"] == seg["para"]:
+            near.append(_SENTENCE_END.split(segments[i + 1]["text"].strip(), 1)[0])
+        if i > 0 and segments[i - 1]["kind"] != "dialogue" and segments[i - 1]["para"] == seg["para"]:
+            near.append(_SENTENCE_END.split(segments[i - 1]["text"].strip())[-1])
+        if any(QUIET_TAG.search(s) or QUIET_ADVERB.search(s) for s in near):
+            quiet.add(seg["q"])
+    return quiet

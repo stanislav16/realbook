@@ -51,15 +51,16 @@ def _clean(text: str) -> str:
     return abbrev.expand(" ".join(text.split()))
 
 
-def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: int, urgent: bool = True) -> Path:
-    """Render `text` to an audio file (once) and return its path."""
+def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: int, urgent: bool = True,
+               style: str = "") -> Path:
+    """Render `text` to an audio file (once) and return its path. `style` "quiet" is for whispered lines."""
     text = _clean(text)
     engine = designed.engine_of(voice)
     if engine and not designed.installed(engine):
         voice = "kokoro:af_heart"  # designed voices were removed; keep reading with the next best
     if voice.startswith("kokoro:") and not kokoro_tts.installed():
         voice = system.default_voice()  # natural voices were removed; keep reading with a system voice
-    key = hashlib.sha1(f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}".encode()).hexdigest()
+    key = hashlib.sha1(f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}{'|' + style if style else ''}".encode()).hexdigest()
     out = cache_dir / f"{key}{system.AUDIO_EXT}"
     if out.exists():
         return out
@@ -71,11 +72,11 @@ def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: i
         cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".tmp" + system.AUDIO_EXT)
         if designed.engine_of(voice):
-            designed.synthesize(tmp, text, voice, urgent)  # has its own queue, with the same priorities
+            designed.synthesize(tmp, text, voice, urgent, style)  # has its own queue, with the same priorities
         elif voice.startswith("kokoro:"):
             _kokoro_gate.acquire(urgent)
             try:
-                kokoro_tts.synthesize(tmp, text, voice, rate, pitch_shift)
+                kokoro_tts.synthesize(tmp, text, voice, rate, pitch_shift, style)
             finally:
                 _kokoro_gate.release()
         else:

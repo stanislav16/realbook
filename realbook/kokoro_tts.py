@@ -200,7 +200,7 @@ def _get_model():
     return _model
 
 
-def synthesize(out: Path, text: str, voice: str, rate: int, pitch_shift: int) -> None:
+def synthesize(out: Path, text: str, voice: str, rate: int, pitch_shift: int, style: str = "") -> None:
     """Render `text` to an .m4a at `out`.
 
     Kokoro has no pitch control, so pitch is shifted by resampling: speak a little slower,
@@ -208,11 +208,13 @@ def synthesize(out: Path, text: str, voice: str, rate: int, pitch_shift: int) ->
     """
     ids = voice.split(":", 1)[1].split("+")
     model = _get_model()
-    style = np.mean([model.get_voice_style(i) for i in ids], axis=0)
+    style_vec = np.mean([model.get_voice_style(i) for i in ids], axis=0)
     lang = "en-gb" if ids[0].startswith("b") else "en-us"
     factor = 2 ** (pitch_shift / 60)
     speed = float(np.clip(rate / BASE_RATE / factor, 0.5, 2.0))
-    samples, sample_rate = model.create(text, voice=style, speed=speed, lang=lang)
+    samples, sample_rate = model.create(text, voice=style_vec, speed=speed * (0.94 if style == "quiet" else 1), lang=lang)
+    if style == "quiet":
+        samples = samples * 0.5  # Kokoro can't whisper: a whispered line is a little slower and 6 dB quieter
 
     pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
     with tempfile.NamedTemporaryFile(suffix=".wav", dir=out.parent, delete=False) as tmp:

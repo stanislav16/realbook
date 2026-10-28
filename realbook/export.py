@@ -17,7 +17,7 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import m4b, store, system, tts
+from . import heuristic, m4b, store, system, tts
 
 RATE = 24000
 GAP_LINE, GAP_PARAGRAPH, GAP_TITLE, GAP_CHAPTER = 0.09, 0.32, 0.8, 1.5  # seconds
@@ -119,32 +119,34 @@ def _run(book_id: str) -> None:
     narrator = book["narrator"]
     started = time.monotonic()
 
-    def render(text: str, v: dict) -> bytes:
+    def render(text: str, v: dict, style: str) -> bytes:
         if job["cancel"]:
             raise Cancelled
         # Not urgent: if someone is listening at the same time, their lines go first.
-        path = tts.synthesize(audio, store.spoken(book, text), v["voice"], v["rate"], v.get("pitch_shift", 0), urgent=False)
+        path = tts.synthesize(audio, store.spoken(book, text), v["voice"], v["rate"], v.get("pitch_shift", 0), urgent=False, style=style)
         return _pcm(path)
 
     try:
-        items = []  # (chapter index, text, voice settings, pause after)
+        items = []  # (chapter index, text, voice settings, pause after, style)
         for ci, ch in enumerate(book["chapters"]):
             heading = _spoken_title(ch["title"])
             if heading:
-                items.append((ci, heading, narrator, GAP_TITLE))
+                items.append((ci, heading, narrator, GAP_TITLE, ""))
             segs = ch["segments"]
+            quiet = heuristic.quiet_quotes(segs)
             for i, seg in enumerate(segs):
                 nxt = segs[i + 1] if i + 1 < len(segs) else None
                 pause = GAP_CHAPTER if nxt is None else GAP_PARAGRAPH if nxt["para"] != seg["para"] else GAP_LINE
-                items.append((ci, seg["text"], store.voice_for(book, seg), pause))
+                style = "quiet" if seg["kind"] == "dialogue" and seg.get("speaker") and seg["q"] in quiet else ""
+                items.append((ci, seg["text"], store.voice_for(book, seg), pause, style))
         job.update(total=len(items), message="Making the audio…")
 
         caf = _Caf(work)
         chapters: list[tuple[int, str]] = []
         try:
             with ThreadPoolExecutor(4) as pool:  # lines are made in order; decoding overlaps
-                results = pool.map(lambda it: render(it[1], it[2]), items)
-                for n, ((ci, _, _, pause), pcm) in enumerate(zip(items, results), 1):
+                results = pool.map(lambda it: render(it[1], it[2], it[4]), items)
+                for n, ((ci, _, _, pause, _), pcm) in enumerate(zip(items, results), 1):
                     if not chapters or chapters[-1][2] != ci:
                         chapters.append((caf.ms, book["chapters"][ci]["title"] or f"Chapter {ci + 1}", ci))
                     caf.add(pcm)

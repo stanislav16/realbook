@@ -310,3 +310,11 @@ a.button { text-decoration: none; display: inline-flex; align-items: center; }
 
 .engine-offer { border: .5px solid var(--separator); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
 .engine-offer p { margin: 4px 0 8px; }
+
+/* Job progress and menu notes */
+.spinner { display: inline-block; width: 10px; height: 10px; margin-right: 8px; vertical-align: -1px; border: 1.5px solid currentColor;
+  border-right-color: transparent; border-radius: 50%; opacity: .65; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.menu-note { margin-left: auto; padding-left: 18px; color: var(--secondary); font-size: 12px; }
+.char-top .more-btn { margin-left: 6px; }
+.menu button:hover:not(:disabled) .menu-note { color: inherit; opacity: .85; }

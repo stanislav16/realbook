@@ -222,6 +222,7 @@ def get_book(book_id: str):
         "narrator": b["narrator"],
         "cast": b["characters"],
         "toc": [{"title": c["title"], "section": c.get("section", ""), "segments": len(c["segments"])} for c in b["chapters"]],
+        "ai_done": b.get("ai_done", {}),
         "job": jobs.get(book_id),
     }
 
@@ -331,6 +332,54 @@ def design_voice(book_id: str, who: str, d: Design):
     return person
 
 
+class CharacterChange(BaseModel):
+    name: str
+
+
+@app.patch("/api/books/{book_id}/characters/{char_id}")
+def rename_character(book_id: str, char_id: str, change: CharacterChange):
+    """Rename a character (e.g. "The old woman" to "Reverend Mother"); the old name stays an alias."""
+    b = _book(book_id)
+    name = " ".join(change.name.split())[:80]
+    if not name:
+        raise HTTPException(400, "A name is needed")
+    with store.lock(book_id):
+        for c in b["characters"]:
+            if c["id"] == char_id:
+                if c["name"] != name:
+                    c["aliases"] = list(dict.fromkeys([*c.get("aliases", []), c["name"]]))
+                    c["name"] = name
+                store.save(b)
+                return c
+    raise HTTPException(404, "Character not found")
+
+
+@app.delete("/api/books/{book_id}/characters/{char_id}")
+def remove_character(book_id: str, char_id: str, into: str | None = None):
+    """Remove a character. With `into`, their lines go to that character (merging a duplicate);
+    otherwise the narrator reads them."""
+    b = _book(book_id)
+    with store.lock(book_id):
+        gone = next((c for c in b["characters"] if c["id"] == char_id), None)
+        if gone is None:
+            raise HTTPException(404, "Character not found")
+        target = next((c for c in b["characters"] if c["id"] == into), None) if into else None
+        if into and (target is None or into == char_id):
+            raise HTTPException(400, "Unknown character to merge into")
+        moved = 0
+        for ch in b["chapters"]:
+            for seg in ch["segments"]:
+                if seg.get("speaker") == char_id:
+                    seg["speaker"] = into
+                    moved += 1
+        if target:
+            target["aliases"] = list(dict.fromkeys([*target.get("aliases", []), gone["name"], *gone.get("aliases", [])]))
+        b["characters"] = [c for c in b["characters"] if c["id"] != char_id]
+        store.recount_lines(b)
+        store.save(b)
+    return {"moved": moved, "cast": b["characters"]}
+
+
 class NewCharacter(BaseModel):
     name: str
     gender: str = "unknown"
@@ -423,6 +472,10 @@ def analyze(book_id: str, req: AnalyzeRequest):
                     book = store.load(book_id)
                     local_analyzer.apply(book, results)
                     store.save(book)
+                with store.lock(book_id):
+                    book = store.load(book_id)
+                    book.setdefault("ai_done", {}).update(speakers=time.time(), describe=time.time())
+                    store.save(book)
                 job.update(state="done", message=f"Changed the speaker of {n} lines, and updated the descriptions")
             except Exception as e:  # surfaced to the UI
                 job.update(state="error", message=str(e))
@@ -445,6 +498,7 @@ def analyze(book_id: str, req: AnalyzeRequest):
                 with store.lock(book_id):
                     book = store.load(book_id)
                     n = local_analyzer.apply(book, results)
+                    book.setdefault("ai_done", {})["describe"] = time.time()
                     store.save(book)
                 job.update(state="done", message=f"Described {n} characters from what the book says about them")
             except Exception as e:  # surfaced to the UI

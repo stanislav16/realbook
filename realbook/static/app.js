@@ -122,13 +122,14 @@ function toast(msg, ms = 3500) {
   toastTimer = setTimeout(() => t.classList.add("hidden"), ms);
 }
 
-// A macOS-style popup menu next to `anchor`. items: [{label, action, danger, disabled, dot}] or "-".
+// A macOS-style popup menu next to `anchor`. items: [{label, action, danger, disabled, dot, note}] or "-".
 function popupMenu(anchor, items) {
   const menu = $("#menu");
   menu.replaceChildren(...items.filter(Boolean).map((it) => it === "-" ? el("hr") : el("button", {
     class: it.danger ? "danger" : "", disabled: it.disabled,
     onclick: (e) => { e.stopPropagation(); closeMenu(); it.action(); },
-  }, it.dot !== undefined ? el("span", { class: "dot", style: it.dot ? `--c:${it.dot}` : "" }) : null, it.label)));
+  }, it.dot !== undefined ? el("span", { class: "dot", style: it.dot ? `--c:${it.dot}` : "" }) : null, it.label,
+    it.note ? el("span", { class: "menu-note" }, it.note) : null)));
   menu.classList.remove("hidden");
   const r = anchor.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
@@ -713,7 +714,8 @@ function renderCast() {
       el("div", { class: "char-top" },
         el("span", { class: "dot" }),
         el("span", { class: "char-name" }, c.name),
-        el("span", { class: "char-lines" }, `${c.lines} line${c.lines === 1 ? "" : "s"}`)),
+        el("span", { class: "char-lines" }, `${c.lines} line${c.lines === 1 ? "" : "s"}`),
+        el("button", { class: "more-btn", title: "Rename, merge or remove", onclick: (e) => { e.stopPropagation(); characterMenu(e.currentTarget, c); } }, "•••")),
       el("div", { class: "char-summary" }, c.summary && c.summary !== meta ? c.summary : meta || "no description found",
         c.not_person ? el("em", {}, " · probably not a person") : null),
       c.evidence?.length ? el("details", {}, el("summary", {}, "What the book says"), ...c.evidence.map((e) => el("blockquote", {}, e))) : null,
@@ -726,15 +728,71 @@ function renderCast() {
   $("#cast-list").replaceChildren(narrator, ...cards);
 }
 
+// "✓ 28 Oct" when an AI step has already been run on this book.
+function doneNote(step) {
+  const t = S.book.ai_done?.[step];
+  return t ? `✓ ${new Date(t * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : null;
+}
+
 function castMenu(anchor) {
   const busy = S.book.job?.state === "running";
   popupMenu(anchor, [
-    S.config.local_ai?.supported ? { label: "Describe Characters with Local AI…", disabled: busy, action: () => analyze("local") } : null,
-    S.config.local_ai?.supported ? { label: "Find Speakers with Local AI…", disabled: busy, action: () => analyze("local-speakers") } : null,
+    S.config.local_ai?.supported ? { label: "Describe Characters with Local AI…", disabled: busy, note: doneNote("describe"), action: () => analyze("local") } : null,
+    S.config.local_ai?.supported ? { label: "Find Speakers with Local AI…", disabled: busy, note: doneNote("speakers"), action: () => analyze("local-speakers") } : null,
     { label: S.config.claude ? "Analyze with Claude…" : "Analyze with Claude (add a key in Settings)", disabled: busy || !S.config.claude, action: () => analyze("claude") },
     "-",
     { label: "Add Character…", action: () => newCharacter() },
   ]);
+}
+
+function characterMenu(anchor, c) {
+  popupMenu(anchor, [
+    { label: "Rename…", action: () => renameCharacter(c) },
+    { label: "Merge into…", action: () => mergeCharacter(c) },
+    "-",
+    { label: "Remove", danger: true, action: () => removeCharacter(c) },
+  ]);
+}
+
+async function renameCharacter(c) {
+  const others = [...new Set([...(c.other_names || []), ...(c.aliases || [])])].filter((n) => n !== c.name).slice(0, 6);
+  const v = await ask({
+    title: `Rename “${c.name}”`, ok: "Rename",
+    fields: [{ name: "name", label: "Name", value: c.name, help: others.length ? `The book also calls them: ${others.join(", ")}` : "" }],
+  });
+  if (!v || !v.name || v.name === c.name) return;
+  try {
+    const updated = await api(`/api/books/${S.book.id}/characters/${c.id}`, { method: "PATCH", json: { name: v.name } });
+    S.book.cast = S.book.cast.map((x) => (x.id === c.id ? updated : x));
+    renderCast(); renderPage(); highlight();
+  } catch (e) { toast(e.message); }
+}
+
+async function mergeCharacter(c) {
+  const options = S.book.cast.filter((x) => x.id !== c.id).sort((a, b) => b.lines - a.lines).map((x) => [x.id, `${x.name} (${x.lines} lines)`]);
+  const v = await ask({
+    title: `Merge “${c.name}” into…`, ok: "Merge",
+    text: `For when two entries are the same person. ${c.lines ? `Their ${c.lines} lines` : "Their lines"} move to the character you choose, and “${c.name}” is removed.`,
+    fields: [{ name: "into", label: "Same person as", value: options[0]?.[0], options }],
+  });
+  if (!v) return;
+  await dropCharacter(c, v.into);
+}
+
+async function removeCharacter(c) {
+  const ok = await ask({ title: `Remove “${c.name}”?`, ok: "Remove", danger: true,
+    text: c.lines ? `Their ${c.lines} lines will be read by the narrator. To give them to another character instead, use Merge into…` : "" });
+  if (ok) await dropCharacter(c, null);
+}
+
+async function dropCharacter(c, into) {
+  try {
+    const r = await api(`/api/books/${S.book.id}/characters/${c.id}${into ? `?into=${encodeURIComponent(into)}` : ""}`, { method: "DELETE" });
+    S.book.cast = r.cast;
+    S.chapter = await api(`/api/books/${S.book.id}/chapters/${S.chapterIdx}`);
+    voicesChanged(); renderCast(); renderPage(); highlight();
+    toast(into ? `Merged into ${S.book.cast.find((x) => x.id === into)?.name}` : `Removed ${c.name}`);
+  } catch (e) { toast(e.message); }
 }
 
 async function newCharacter() {
@@ -780,7 +838,7 @@ function showJob(job) {
   if (!job) return box.classList.add("hidden");
   box.classList.remove("hidden");
   box.classList.toggle("error", job.state === "error");
-  box.textContent = job.state === "running" ? `⏳ ${job.message}` : job.message;
+  box.replaceChildren(...(job.state === "running" ? [el("span", { class: "spinner" }), job.message] : [job.message]));
 }
 
 async function analyze(engine) {

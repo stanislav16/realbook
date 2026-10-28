@@ -201,7 +201,7 @@ def recast_all() -> None:
 
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
 PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
-CAST_VERSION = 3  # bump when voice descriptions or design settings change; prepare() re-casts every book
+CAST_VERSION = 4  # bump when voice descriptions or design settings change; prepare() re-casts every book
 SPEAKERS_VERSION = 2  # 2: pronouns ("She's") had become characters; prepare() hands their lines out again
 
 

@@ -48,9 +48,10 @@ NARRATOR_DESCRIPTION = ("An adult woman with a bright, clear voice and a neutral
                         "reading a story aloud with feeling.")
 # Spoken by every designed voice; lines are cloned from it. It has a statement, an exclamation and
 # a question, so the clone hears how this voice exclaims and asks: with a calm sample, "!" often
-# came out rising like a question (a blind listening test preferred this in 8 of 8 lines).
-REFERENCE_TEXT = ("I have been thinking about it all morning. Listen to me! This is important, and I won't say "
-                  "it twice. Do you understand? Good. Then let's go!")
+# came out rising like a question. A more dramatic sample fixed that but made every voice too
+# excitable (and old characters sound young); listening tests chose this moderate one.
+REFERENCE_TEXT = ("I have been thinking about it all morning, and I suppose I should just tell you. "
+                  "It is good news, really! Would you like to hear it?")
 # What voices designed before that change say in their sample; they're still cloned with it.
 CALM_REFERENCE_TEXT = ("I have been thinking about it all morning, and I suppose there is no better time to tell you. "
                        "Some things are easier to say out loud than to keep to yourself.")
@@ -123,7 +124,7 @@ QWEN = Engine(
     design_role="designer", read_role="reader",
     design=lambda m, description: m.generate_voice_design(text=REFERENCE_TEXT, instruct=description, language="English"),
     read=lambda m, text, ref, ref_text: m.generate(text=text, ref_audio=str(ref), ref_text=ref_text, lang_code="english"),
-    design_version=2,  # 2: the expressive sample
+    design_version=3,  # 2: an expressive sample; 3: a moderate one
     speed_note="About twice as fast as listening on a recent Mac.",
 )
 
@@ -151,7 +152,7 @@ BREEZE = Engine(
     # 1.5 is clear and, with gender stated in the description, still follows it.
     design=lambda m, description: m.generate(text=REFERENCE_TEXT, instruct=description, cfg_scale=1.5),
     read=lambda m, text, ref, ref_text: m.generate(text=text, ref_audio=str(ref), ref_text=ref_text),
-    design_version=3,  # 2: strictness 1.5 and the quality check; 3: the expressive sample
+    design_version=4,  # 2: strictness 1.5 and the quality check; 3: an expressive sample; 4: a moderate one
     check_quality=True,
     licence_note=("Breeze-TTS-2's licence allows research and non-commercial use only: fine for listening to "
                   "your own books, but don't sell or publish what it makes."),
@@ -292,7 +293,7 @@ def describe_character(char: dict) -> str:
         ("male", "child"): "A ten-year-old boy", ("female", "child"): "A ten-year-old girl",
         ("male", "young"): "A young man in his twenties", ("female", "young"): "A young woman in her twenties",
         ("male", "adult"): "An adult man", ("female", "adult"): "An adult woman",
-        ("male", "old"): "An old man in his seventies", ("female", "old"): "An old woman in her seventies",
+        ("male", "old"): "An elderly man in his late seventies", ("female", "old"): "An elderly woman in her late seventies",
     }.get((gender, age)) or {"child": "A child", "young": "A young adult", "old": "An elderly person"}.get(age, "An adult")
     pitch = char.get("pitch", 0)
     # How the voice sounds: from the local AI's reading of the book when there is one; otherwise
@@ -302,20 +303,28 @@ def describe_character(char: dict) -> str:
     # so they get "clear" instead.
     if age == "child" and timbre == "slightly raspy":
         timbre = "lively"
+    if age == "old" and not char.get("sound"):
+        timbre = "weathered" if gender == "male" else "dry"  # youthful words ("crisp", "lively") made them sound young
     parts = {-1: ["deep"], 1: ["high"]}.get(pitch, [])
     if char.get("sound") or not parts:  # deep/high voices from the free analyzer stay simple
         parts.append(timbre)
+    if age == "old":
+        parts.append("weathered")
+        if gender == "male":
+            parts.append("aged")
     if gender == "male":
         parts = [re.sub(r"\bbright\b", "clear", p) for p in parts]  # "bright" makes men's voices higher
         parts.append("boyish" if age == "child" else "masculine")
+    elif age == "old":
+        pass  # "clear" makes old women sound young; "dry, weathered … shaky with age" won a listening test
     elif "clear" not in " ".join(parts):
         parts.append("clear")
     elif parts == ["clear"]:
         parts = ["bright", "clear"]
     voice = ", ".join(dict.fromkeys(w.strip() for p in parts for w in p.split(",") if w.strip()))  # no "deep, deep"
     voice = f"{'an' if voice[0] in 'aeiou' else 'a'} {voice} voice"
-    if gender == "male" and age == "old" and pitch != -1 and "grav" not in timbre:
-        voice += ", a little gravelly with age,"  # keeps old men's voices low without muffling them
+    if age == "old":  # both won listening tests against wording that only said "old"
+        voice += ", slightly hoarse with age," if gender == "male" else ", slightly shaky with age,"
     accent = char.get("accent", "")
     text = f"{who} with {voice}".rstrip(",")
     if accent:
@@ -473,7 +482,8 @@ def _quality(samples: np.ndarray, description: str) -> tuple[float, bool]:
     if re.search(r"\b(man|gentleman)\b", words) and not re.search(r"\bhigh\b", words):  # unless meant to be high
         off = max(0.0, pitch - MALE_MAX_PITCH_HZ)
     elif re.search(r"\b(woman|girl)\b", words) and pitch:
-        off = max(0.0, FEMALE_MIN_PITCH_HZ - pitch)
+        floor = 140 if re.search(r"\b(elderly|old)\b", words) else FEMALE_MIN_PITCH_HZ  # older women speak lower
+        off = max(0.0, floor - pitch)
     score = min(rolloff, 3000.0) - 15 * off  # past 3 kHz a voice is clear enough; don't trade pitch for more
     return score, rolloff >= CLEAR_ROLLOFF_HZ and off == 0
 

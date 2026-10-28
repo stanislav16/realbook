@@ -202,6 +202,34 @@ def recast_all() -> None:
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
 PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
 CAST_VERSION = 2  # bump when voice descriptions or design settings change; prepare() re-casts every book
+SPEAKERS_VERSION = 2  # 2: pronouns ("She's") had become characters; prepare() hands their lines out again
+
+
+def fix_pronoun_characters(book: dict) -> bool:
+    """Remove "characters" that are really pronouns, giving their lines to whoever "she"/"he" was.
+
+    Only those lines change; speakers you set by hand elsewhere stay as they are.
+    """
+    import copy
+
+    bogus = {c["id"] for c in book["characters"] if c["name"].lower() in heuristic.PRONOUNS}
+    if not bogus:
+        return False
+    chapters = copy.deepcopy(book["chapters"])
+    fresh = {c["id"]: c for c in heuristic.analyze(chapters)["characters"]}
+    have = {c["id"] for c in book["characters"]} - bogus
+    for ch, again in zip(book["chapters"], chapters):
+        for seg, seg_again in zip(ch["segments"], again["segments"]):
+            if seg.get("speaker") in bogus:
+                who = seg_again.get("speaker")
+                if who and who not in have and who in fresh:  # e.g. "the old woman", hidden inside "She" before
+                    book["characters"].append(fresh[who])
+                    have.add(who)
+                seg["speaker"] = who if who in have else None
+    book["characters"] = [c for c in book["characters"] if c["id"] not in bogus]
+    recount_lines(book)
+    book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
+    return True
 
 
 def reprofile(book: dict) -> None:
@@ -270,6 +298,14 @@ def prepare() -> None:
                     reprofile(book)
                     save(book)
         values["profile_version"] = PROFILE_VERSION
+        save_settings(values)
+    if values.get("speakers_version", 1) < SPEAKERS_VERSION:
+        for s in list_books():
+            book = load(s["id"])
+            with lock(book["id"]):
+                if fix_pronoun_characters(book):
+                    save(book)
+        values["speakers_version"] = SPEAKERS_VERSION
         save_settings(values)
     if values.get("cast_version", 1) < CAST_VERSION:
         recast_all()  # voices you picked by hand are kept

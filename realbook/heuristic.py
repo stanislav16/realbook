@@ -169,7 +169,12 @@ def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "char"
 
 
+PRONOUNS = {"i", "me", "he", "him", "she", "her", "it", "we", "us", "they", "them", "you", "one", "who"}
+
+
 def _clean_name(raw: str) -> str | None:
+    # Drop "'s", "'d", "'ll"… first: "She's" must be seen as "She", which is not a name.
+    raw = re.sub(r"['’](?:s|d|ll|re|ve|m)\b", "", raw)
     words = raw.replace("’", "'").split()
     while words and words[0].rstrip(".") in STOP:
         words = words[1:]
@@ -182,6 +187,8 @@ def _clean_name(raw: str) -> str | None:
     name = " ".join(words)
     if name.endswith("'s"):
         name = name[:-2]
+    if name.lower() in PRONOUNS:  # a pronoun is never a character
+        return None
     return name
 
 

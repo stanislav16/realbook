@@ -202,8 +202,9 @@ def recast_all() -> None:
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
 PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
 CAST_VERSION = 4  # bump when voice descriptions or design settings change; prepare() re-casts every book
-SPEAKERS_VERSION = 4  # 2: pronouns ("She's") had become characters; 3: so had things ("the memory");
-#                       4: a paragraph's quotes split between speakers by the AI are joined again
+SPEAKERS_VERSION = 5  # 2: pronouns ("She's") had become characters; 3: so had things ("the memory");
+#                       4: a paragraph's quotes split between speakers by the AI are joined again;
+#                       5: "said the man" right after someone was addressed by name is that person
 
 
 def _fake(name: str) -> bool:
@@ -212,6 +213,38 @@ def _fake(name: str) -> bool:
     if name.lower() in heuristic.PRONOUNS:
         return True
     return len(words) >= 2 and words[0] == "the" and not heuristic._is_person_noun(words[-1])
+
+
+def resolve_generic_tags(book: dict) -> bool:
+    """Lines tagged only "said the man"/"the woman said" get the rules' current answer: the person
+    just addressed by name, if any ("Assuredly, Baron," said the man → Piter). Hand-set lines kept."""
+    import copy
+
+    from . import local_analyzer
+
+    chapters = copy.deepcopy(book["chapters"])
+    heuristic.analyze(chapters)
+    have = {c["id"] for c in book["characters"]}
+    changed = False
+    for ch, fresh in zip(book["chapters"], chapters):
+        new = {s["q"]: s.get("speaker") for s in fresh["segments"] if s["kind"] == "dialogue"}
+        for p in local_analyzer.paragraphs(ch):
+            narr = " ".join(x[1] for x in p["parts"] if x[0] == "n")
+            m = heuristic.TAG_NOMINAL.search(narr)
+            if not m or heuristic.TAG_AFTER.search(narr) or heuristic.TAG_BEFORE.search(narr):
+                continue
+            adj, noun = (m.group(1), m.group(2)) if m.group(2) else (m.group(3), m.group(4))
+            if heuristic._nominal(adj, noun) not in heuristic.GENERIC_TAGS:
+                continue
+            for s in ch["segments"]:
+                who = new.get(s.get("q"))
+                if (s["kind"] == "dialogue" and s["para"] == p["para"] and not s.get("by_hand")
+                        and who in have and who != s.get("speaker")):
+                    s["speaker"] = who
+                    changed = True
+    if changed:
+        recount_lines(book)
+    return changed
 
 
 def join_split_paragraphs(book: dict) -> bool:
@@ -334,6 +367,7 @@ def prepare() -> None:
             with lock(book["id"]):
                 changed = fix_fake_characters(book)
                 changed = join_split_paragraphs(book) or changed
+                changed = resolve_generic_tags(book) or changed
                 if changed:
                     save(book)
         values["speakers_version"] = SPEAKERS_VERSION

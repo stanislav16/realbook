@@ -332,13 +332,16 @@ def analyze(chapters: list[dict]) -> dict:
     # 3. Attribute quotes.
     recent: list[str] = []  # character ids, most recent last
     last_speakers: list[str] = []
+    addressed: list[str] = []  # named inside the last paragraph's quotes
     for para in paragraphs:
         narr = para["narration"]
         hits = _mention_spans(narr, mention_re, alias_to_id)
         mentioned = list(dict.fromkeys(cid for cid, _, _ in hits))
         speaker = None
         if para["quotes"]:
-            speaker = _tagged_speaker(narr, alias_to_id, chars, recent, hits)
+            quote_names = _addressed(para["quotes"], mention_re, alias_to_id)
+            speaker = _tagged_speaker(narr, alias_to_id, chars, recent, hits, addressed, quote_names)
+            addressed = quote_names
             if speaker is None and para["cont"] and last_speakers and last_speakers[-1] != "?":
                 speaker = last_speakers[-1]  # a quote running on from the last paragraph, if we knew who said that
             if speaker is None and len(set(mentioned)) == 1:
@@ -481,8 +484,28 @@ def _touch(recent: list[str], cid: str) -> None:
     recent.append(cid)
 
 
-def _tagged_speaker(narr: str, alias_to_id, chars, recent, hits) -> str | None:
-    """Resolve the speech tag that comes first in the narration around a quote."""
+GENERIC_TAGS = {"the man": "male", "the boy": "male", "the woman": "female", "the girl": "female"}
+
+
+def _addressed(quotes: list[dict], mention_re, alias_to_id) -> list[str]:
+    """Characters spoken TO by name in these quotes: "Assuredly, Baron," / "There it is, Piter—…".
+    A name used otherwise ("This is Paul Atreides") doesn't count."""
+    out = []
+    for seg in quotes:
+        text = seg["text"]
+        for cid, start, end in _mention_spans(text, mention_re, alias_to_id):
+            before, after = text[:start].rstrip(), text[end:].lstrip()
+            if (not before or before[-1] in ",;—–") and (not after or after[0] in ",.!?—–;"):
+                out.append(cid)
+    return list(dict.fromkeys(out))
+
+
+def _tagged_speaker(narr: str, alias_to_id, chars, recent, hits, addressed=(), quote_names=()) -> str | None:
+    """Resolve the speech tag that comes first in the narration around a quote.
+
+    `addressed`: characters named inside the previous paragraph's quotes (they're in the scene);
+    `quote_names`: characters named inside this quote (the speaker is talking to them, not as them).
+    """
     found: list[tuple[int, str | None]] = []
     for rx in (TAG_AFTER, TAG_BEFORE):
         for m in rx.finditer(narr):
@@ -494,6 +517,17 @@ def _tagged_speaker(narr: str, alias_to_id, chars, recent, hits) -> str | None:
     if m:
         adj, noun = (m.group(1), m.group(2)) if m.group(2) else (m.group(3), m.group(4))
         phrase = _nominal(adj, noun)
+        if phrase in GENERIC_TAGS:
+            # "said the man" doesn't say which man: take the man in the scene, as for "he said",
+            # but not whoever this quote addresses by name ("Assuredly, Baron," said the man).
+            before = [cid for cid, start, _ in hits if start < m.start()]
+            # Only someone just addressed by name ("There it is, Piter…" / "Assuredly, Baron," said the
+            # man): an unnamed stranger stays "the man".
+            pool = [cid for cid in addressed if cid not in quote_names]
+            match = next((cid for cid in pool if _gender(chars[cid]) == GENERIC_TAGS[phrase]), None)
+            if match:
+                found.append((m.start(), match))
+                phrase = None
         for phrase in (phrase, f"the {phrase.split()[-1]}" if phrase else None):
             if phrase and phrase in alias_to_id:
                 found.append((m.start(), alias_to_id[phrase]))

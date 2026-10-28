@@ -145,6 +145,43 @@ PRONOUN_M = re.compile(r"\b(he|his|himself)\b", re.IGNORECASE)
 PRONOUN_F = re.compile(r"\b(she|hers|herself)\b", re.IGNORECASE)
 
 
+# "The ___ said" is only a character when ___ is a person: "the old woman", "the guard", not
+# "the memory" or "the table". Nouns for people, plus words that usually name one by what they do.
+PERSON_WORDS = set("""
+    man woman men women boy boys girl girls lady ladies gentleman gentlemen child children kid kids lad lass fellow
+    youth baby infant twin twins person people folk stranger visitor guest newcomer host hostess crowd
+    mother father mum mom dad mama papa sister brother uncle aunt son daughter wife husband cousin
+    grandmother grandfather granny grandpa grandma widow widower bride groom niece nephew parent parents
+    king queen prince princess duke duchess baron baroness count countess earl lord emperor empress
+    chief leader master mistress boss captain general colonel major sergeant lieutenant commander admiral
+    soldier soldiers guard guards trooper troopers knight knights squire page warrior warriors officer officers
+    priest priestess monk nun reverend bishop prophet witch wizard sorcerer sorceress crone hag
+    servant servants maid butler footman slave slaves cook chef waiter waitress bartender clerk secretary
+    doctor nurse surgeon teacher student professor scientist engineer mechanic pilot sailor sailors fisherman
+    farmer hunter thief robber bandit pirate pirates prisoner captive assassin spy agent courier messenger herald
+    judge lawyer banker merchant trader smuggler smugglers gladiator truthsayer mentat ecologist planetologist
+    giant dwarf elf creature friend enemy rival companion partner mate
+    male female redhead blonde blond brunette youngster elder elders veteran novice recruit cadet cadets
+    czar tsar sultan shah pharaoh caliph khan bashar magnate delegate delegates envoy ambassador minister
+    citizen citizens peasant peasants villager villagers native natives tribesman crew troop troops
+    owl cat fox tortoise frog frogs dog wolf bear lion mouse rabbit hare crow raven horse donkey snake
+    serpent dragon eagle hawk kite kites monkey ape goat sheep pig cow bull rat ant grasshopper parrot
+    """.split())  # animals talk in fables and fantasy
+PERSON_SUFFIX = re.compile(r"(?:er|or|ist|ess|ian|eer)s?$")
+NOT_PEOPLE = set("""
+    water paper letter corner matter number order power answer center centre danger river weather winter summer
+    silver finger shoulder mirror door floor color colour error terror honor honour labor labour shelter border
+    chamber cluster pattern feather leather thunder hunger anger
+    """.split())
+
+
+def _is_person_noun(noun: str) -> bool:
+    noun = noun.lower()
+    if noun in PERSON_WORDS or re.search(r"(?:man|men|woman|women|person|people)$", noun):  # "businessman"
+        return True
+    return len(noun) > 4 and bool(PERSON_SUFFIX.search(noun)) and noun not in NOT_PEOPLE
+
+
 def _nominal(adj: str | None, noun: str | None) -> str | None:
     """Normalise "the old man" / "the cat finally" (→ "the cat") from a speech tag, or None if it isn't a person."""
     if not noun:
@@ -153,7 +190,7 @@ def _nominal(adj: str | None, noun: str | None) -> str | None:
         if not adj:
             return None
         adj, noun = None, adj
-    if noun in FUNCTION_WORDS or noun in NOT_SPEAKERS or len(noun) <= 2:
+    if noun in FUNCTION_WORDS or noun in NOT_SPEAKERS or len(noun) <= 2 or not _is_person_noun(noun):
         return None
     if adj and (adj in FUNCTION_WORDS or adj.endswith("ly")):
         adj = None

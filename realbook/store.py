@@ -202,17 +202,25 @@ def recast_all() -> None:
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
 PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
 CAST_VERSION = 4  # bump when voice descriptions or design settings change; prepare() re-casts every book
-SPEAKERS_VERSION = 2  # 2: pronouns ("She's") had become characters; prepare() hands their lines out again
+SPEAKERS_VERSION = 3  # 2: pronouns ("She's") had become characters; 3: so had things ("the memory")
 
 
-def fix_pronoun_characters(book: dict) -> bool:
-    """Remove "characters" that are really pronouns, giving their lines to whoever "she"/"he" was.
+def _fake(name: str) -> bool:
+    """A "character" that is really a pronoun ("She") or a thing ("The memory")."""
+    words = name.lower().split()
+    if name.lower() in heuristic.PRONOUNS:
+        return True
+    return len(words) >= 2 and words[0] == "the" and not heuristic._is_person_noun(words[-1])
+
+
+def fix_fake_characters(book: dict) -> bool:
+    """Remove "characters" that are really pronouns or things, giving their lines to whoever spoke them.
 
     Only those lines change; speakers you set by hand elsewhere stay as they are.
     """
     import copy
 
-    bogus = {c["id"] for c in book["characters"] if c["name"].lower() in heuristic.PRONOUNS}
+    bogus = {c["id"] for c in book["characters"] if _fake(c["name"])}
     if not bogus:
         return False
     chapters = copy.deepcopy(book["chapters"])
@@ -303,7 +311,7 @@ def prepare() -> None:
         for s in list_books():
             book = load(s["id"])
             with lock(book["id"]):
-                if fix_pronoun_characters(book):
+                if fix_fake_characters(book):
                     save(book)
         values["speakers_version"] = SPEAKERS_VERSION
         save_settings(values)

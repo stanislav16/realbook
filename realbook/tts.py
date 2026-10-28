@@ -9,7 +9,8 @@ from pathlib import Path
 
 from . import abbrev, designed, kokoro_tts, system
 
-AUDIO_VERSION = 2  # bump when the audio format changes; store.prepare() clears audio made the old way
+AUDIO_VERSION = 3  # bump when the audio format changes; store.prepare() clears audio made the old way
+#                   3: designed lines fade out instead of stopping dead, and clipped ones are made again
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 

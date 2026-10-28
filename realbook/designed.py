@@ -691,25 +691,61 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
                 gap = np.zeros(int(0.4 * SAMPLE_RATE), np.float32)
                 _write_wav(joined, np.concatenate([_read_wav(usual), gap, _read_wav(ref)]))
             ref, ref_text = joined, f"{info.get('reference_text', CALM_REFERENCE_TEXT)} {ref_text}"
-    if style in engine.styles and STYLES[style].keep_voice and engine.fingerprint:
+    def generate() -> np.ndarray:
+        if not (style in engine.styles and STYLES[style].keep_voice and engine.fingerprint):
+            return _generate(engine.read(model, text, ref, ref_text))
         import mlx.core as mx
 
         fingerprint = model.extract_speaker_embedding
         model.extract_speaker_embedding = lambda audio, sr=24000: fingerprint(mx.array(_read_wav(usual)), sr)
         try:
-            samples = _generate(engine.read(model, text, ref, ref_text))
+            return _generate(engine.read(model, text, ref, ref_text))
         finally:
             model.extract_speaker_embedding = fingerprint
-    else:
-        samples = _generate(engine.read(model, text, ref, ref_text))
+
+    # About one line in six stops while its last sound is still going (the model ends a frame too
+    # soon), which sounds clipped. Those are made again, up to twice, keeping the cleanest ending.
+    samples = generate()
+    for _ in range(CUT_RETRIES):
+        if _ending(samples) <= CUT_DB:
+            break
+        again = generate()
+        if _ending(again) < _ending(samples):
+            samples = again
     if style == "quiet" and style in engine.styles:
         over = _loudness(samples) - (_loudness(_read_wav(usual)) - QUIET_DB)
         if over > 0:
             samples = samples * 10 ** (-over / 20)
     with tempfile.NamedTemporaryFile(suffix=".wav", dir=out.parent, delete=False) as tmp:
         wav = Path(tmp.name)
-    _write_wav(wav, samples)
+    _write_wav(wav, _tidy_ends(samples))
     system.encode(wav, out, SAMPLE_RATE)
+
+
+CUT_RETRIES = 2
+CUT_DB = -30  # the last 20 ms louder than this (against the loudest 20 ms) means it stopped mid-sound
+FADE_IN_MS, FADE_OUT_MS, TAIL_MS = 5, 40, 40
+
+
+def _ending(samples: np.ndarray) -> float:
+    """How loud the last 20 ms are, in dB against the loudest 20 ms of the line."""
+    frame = SAMPLE_RATE // 50
+    n = len(samples) // frame
+    if n < 2:
+        return -100.0
+    rms = np.sqrt(np.mean(samples[:n * frame].reshape(n, frame) ** 2, axis=1)) + 1e-9
+    return float(20 * np.log10(rms[-1] / rms.max()))
+
+
+def _tidy_ends(samples: np.ndarray) -> np.ndarray:
+    """A short fade at each end and a moment of silence after: a line that stops dead clicks, and the
+    audio encoder smears a click into noise at the end of the line."""
+    samples = samples.astype(np.float32).copy()
+    fin, fout = SAMPLE_RATE * FADE_IN_MS // 1000, min(len(samples) // 4, SAMPLE_RATE * FADE_OUT_MS // 1000)
+    samples[:fin] *= np.linspace(0, 1, fin, dtype=np.float32)
+    if fout:
+        samples[-fout:] *= np.linspace(1, 0, fout, dtype=np.float32) ** 2
+    return np.concatenate([samples, np.zeros(SAMPLE_RATE * TAIL_MS // 1000, np.float32)])
 
 
 def synthesize(out: Path, text: str, voice: str, urgent: bool = True, style: str = "") -> None:

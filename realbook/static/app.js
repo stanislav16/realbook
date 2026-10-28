@@ -122,19 +122,33 @@ function toast(msg, ms = 3500) {
   toastTimer = setTimeout(() => t.classList.add("hidden"), ms);
 }
 
-// A macOS-style popup menu next to `anchor`. items: [{label, action, danger, disabled, dot, note}] or "-".
-function popupMenu(anchor, items) {
+// A macOS-style popup menu next to `anchor`. items: [{label, action, danger, disabled, dot, note, find}] or "-".
+// With `search`, a field on top filters the items that have `find` (the text to match); Return picks the first.
+function popupMenu(anchor, items, { search = false } = {}) {
   const menu = $("#menu");
-  menu.replaceChildren(...items.filter(Boolean).map((it) => it === "-" ? el("hr") : el("button", {
-    class: it.danger ? "danger" : "", disabled: it.disabled,
+  const buttons = items.filter(Boolean).map((it) => it === "-" ? el("hr") : el("button", {
+    class: it.danger ? "danger" : "", disabled: it.disabled, "data-find": it.find?.toLowerCase(),
     onclick: (e) => { e.stopPropagation(); closeMenu(); it.action(); },
   }, it.dot !== undefined ? el("span", { class: "dot", style: it.dot ? `--c:${it.dot}` : "" }) : null, it.label,
-    it.note ? el("span", { class: "menu-note" }, it.note) : null)));
+    it.note ? el("span", { class: "menu-note" }, it.note) : null));
+  const field = search ? el("input", { class: "search-field menu-search", type: "search", placeholder: "Search", autocomplete: "off", spellcheck: "false",
+    oninput: (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      for (const b of buttons) {
+        if (b.dataset.find !== undefined) b.hidden = !!q && !b.dataset.find.includes(q);
+        else if (b.tagName === "HR") b.hidden = !!q;
+      }
+    },
+    onkeydown: (e) => {
+      if (e.key === "Enter") { e.preventDefault(); buttons.find((b) => b.tagName === "BUTTON" && !b.hidden && b.dataset.find !== undefined)?.click(); }
+    } }) : null;
+  menu.replaceChildren(...(field ? [field] : []), ...buttons);
   menu.classList.remove("hidden");
   const r = anchor.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
   const below = r.bottom + 4;
   menu.style.top = `${below + menu.offsetHeight > innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`;
+  field?.focus();
 }
 function closeMenu() { $("#menu").classList.add("hidden"); }
 
@@ -294,6 +308,7 @@ async function openBook(id) {
   const [book, voices] = await Promise.all([api(`/api/books/${id}`), api("/api/voices")]);
   S.voices = voices;
   S.book = book;
+  $("#cast-search").value = "";
   history.replaceState(null, "", `${location.pathname}${location.search}#${id}`);
   $("#library").classList.add("hidden");
   $("#reader").classList.remove("hidden");
@@ -702,13 +717,17 @@ async function designVoice(who, json, text) {
   } catch (e) { toast(e.message); }
 }
 
+// What a character can be searched by: their name and the other names the book uses.
+const findText = (c) => [c.name, ...(c.aliases || []), ...(c.other_names || [])].join(" ");
+
 function renderCast() {
   const b = S.book;
+  const q = ($("#cast-search").value || "").trim().toLowerCase();
   const narrator = el("div", { class: "char" },
     el("div", { class: "char-top" }, el("span", { class: "dot" }), el("span", { class: "char-name" }, "Narrator")),
     el("div", { class: "char-summary" }, "Reads everything outside quotation marks"),
     ...voiceControls(b.narrator, "narrator", async (s) => { b.narrator = await api(`/api/books/${b.id}/narrator`, { method: "PUT", json: s }); }, ""));
-  const cards = b.cast.map((c) => {
+  const cards = b.cast.filter((c) => !q || findText(c).toLowerCase().includes(q)).map((c) => {
     const meta = [c.gender !== "unknown" ? c.gender : null, c.age !== "adult" ? c.age : null, c.accent ? c.accent.replace("_", " ") : null].filter(Boolean).join(" · ");
     return el("div", { class: "char", style: `--c:${colorOf(c.id)}` },
       el("div", { class: "char-top" },
@@ -725,7 +744,8 @@ function renderCast() {
       c.locked ? el("div", { class: "lock" }, "Voice kept by you: updates and re-casts won't change it.") : null,
     );
   });
-  $("#cast-list").replaceChildren(narrator, ...cards);
+  $("#cast-list").replaceChildren(...(q && !"narrator".includes(q) ? [] : [narrator]), ...cards,
+    ...(q && !cards.length ? [el("p", { class: "muted cast-none" }, `No character called “${q}”`)] : []));
 }
 
 // "✓ 28 Oct" when an AI step has already been run on this book.
@@ -912,11 +932,11 @@ function speakerMenu(anchor, segI) {
     highlight();
   };
   popupMenu(anchor, [
-    ...S.book.cast.map((c) => ({ label: c.name, dot: colorOf(c.id), action: () => choose(c.id) })),
+    ...S.book.cast.map((c) => ({ label: c.name, dot: colorOf(c.id), find: findText(c), action: () => choose(c.id) })),
     { label: "Unknown (narrator reads it)", dot: "", action: () => choose(null) },
     "-",
     { label: "New Character…", action: async () => { const c = await newCharacter(); if (c) await choose(c.id); } },
-  ]);
+  ], { search: S.book.cast.length > 8 });
 }
 
 /* ----------------------------------------------------------------- analysis */
@@ -1273,6 +1293,7 @@ S.audio.addEventListener("playing", () => $("#play").classList.remove("loading")
 S.audio.addEventListener("pause", () => $("#play").classList.remove("loading"));
 S.audio.onended = onEnded;
 S.audio.onerror = () => { if (S.playing) { toast("Couldn't make audio for this line; skipping it"); onEnded(); } };
+$("#cast-search").addEventListener("input", () => renderCast());
 document.addEventListener("click", (e) => {
   if (!$("#menu").contains(e.target)) closeMenu();
   if (!$("#aa-pop").contains(e.target) && e.target !== $("#aa-btn")) { $("#aa-pop").classList.add("hidden"); $("#aa-btn").classList.remove("active"); }

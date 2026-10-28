@@ -44,8 +44,15 @@ class _Gate:
 _kokoro_gate = _Gate()
 
 
+# A drawn-out sound written with hyphens ("Oh-h-h-h", "um-m-m", "Sh-h-h") was spelled out letter by
+# letter. Joined up ("Ohhh") it's said as one sound. Only single repeated letters count, so words
+# like "wide-eyed" stay as they are.
+STRETCHED = re.compile(r"(\w)((?:-\1(?=-|\b))+)", re.IGNORECASE)
+
+
 def _clean(text: str) -> str:
     text = text.replace("[[", "(").replace("]]", ")")  # never pass embedded commands through
+    text = STRETCHED.sub(lambda m: m.group(1) + m.group(1).lower() * min(3, m.group(2).count("-")), text)
     text = re.sub(r"[_*#]+", " ", text)
     text = text.replace("—", ", ").replace("–", ", ")
     return abbrev.expand(" ".join(text.split()))

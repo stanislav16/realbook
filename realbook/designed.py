@@ -99,6 +99,7 @@ class Engine:
     # Qwen's voices are clear, and checking them only costs time).
     check_quality: bool = False
     styles: tuple[str, ...] = ("quiet",)  # ways of speaking it can do (see STYLES)
+    fingerprint: bool = False  # cloning takes a separate speaker fingerprint (Style.keep_voice)
     install: dict = field(default_factory=lambda: {"state": "idle", "progress": 0.0, "message": ""})
 
     def files(self) -> list[tuple[str, str, str, int, str]]:
@@ -132,6 +133,7 @@ QWEN = Engine(
     read=lambda m, text, ref, ref_text: m.generate(text=text, ref_audio=str(ref), ref_text=ref_text, lang_code="english"),
     design_version=3,  # 2: an expressive sample; 3: a moderate one
     styles=("quiet", "loud", "upset"),
+    fingerprint=True,
     speed_note="About twice as fast as listening on a recent Mac.",
 )
 
@@ -337,18 +339,11 @@ def describe_character(char: dict) -> str:
     if accent:
         word = ACCENT_WORDS.get(accent, accent.title())
         text = f"{who} with {voice} and {'an' if word[0] in 'AEIOU' else 'a'} {word} accent"
-    manner = char.get("manner", "")
-    if manner:
-        speed = {-1: "slowly", 1: "quickly"}.get(char.get("pace", 0), "")
-        joint = ", " if re.match(r"\w+ly\b", manner) else " "  # "slowly, calmly and exactly"
-        text += f", speaking {speed + joint if speed else ''}{manner}"
-    else:
-        text += {-1: ", speaking slowly and deliberately", 1: ", speaking quickly and energetically"}.get(char.get("pace", 0), "")
-    text += "."
-    summary = (char.get("summary") or "").strip()
-    if summary.endswith(".") and len(summary.split()) > 5:  # Claude writes a sentence on how they sound
-        text += " " + summary
-    return text
+    # How they speak is left neutral: manners in the description ("with mocking, venomous glee") made
+    # the designer act every line, and men came out cocky, shouting cartoon knights. A character
+    # sounds whispered, shouted or upset only on the lines the book says so (see STYLES).
+    speed = {-1: "slowly, ", 1: "quickly, "}.get(char.get("pace", 0), "")
+    return f"{text}, speaking {speed}naturally and conversationally."
 
 
 def voice_for(engine: Engine, description: str, seed: str = "", take: int = 0) -> str:
@@ -606,13 +601,17 @@ class Style:
     # Keep the usual sample's speaker fingerprint and take only the delivery from the styled one:
     # otherwise shouting or crying sounds like someone else (Qwen only).
     keep_voice: bool = False
+    # Clone from the usual sample followed by the styled one, rather than the styled one alone. For
+    # whispers the fingerprint by itself wasn't enough (Piter came out shouting); joined, a listening
+    # test heard Jessica whisper in her own voice.
+    join: bool = False
 
 
 STYLES = {
     # About half of whisper designs come out spoken: a real whisper is mostly breath, at most half
     # of it with a pitch (normal speech: ~75%).
     "quiet": Style(", whispering quietly and secretively.", QUIET_REFERENCE_TEXT, attempts=4,
-                   score=lambda s, usual: 0.5 - _voiced(s)),
+                   score=lambda s, usual: 0.5 - _voiced(s), keep_voice=True, join=True),
     "loud": Style(", shouting loudly and forcefully.", "Get out! Get out of here, all of you! Do you hear me? Run, now!",
                   attempts=3, score=lambda s, usual: _loudness(s) - _loudness(usual) - 3, keep_voice=True),
     "upset": Style(", speaking in a shaky, tearful, upset voice.",
@@ -686,7 +685,13 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
     model = _model(engine, engine.read_role)
     if style in engine.styles:
         ref, ref_text = _design_style(engine, key, style), STYLES[style].text
-    if style in engine.styles and STYLES[style].keep_voice:
+        if STYLES[style].join and engine.fingerprint:
+            joined = voices_dir(engine) / f"{key}-{style}-joined.wav"
+            if not joined.exists():
+                gap = np.zeros(int(0.4 * SAMPLE_RATE), np.float32)
+                _write_wav(joined, np.concatenate([_read_wav(usual), gap, _read_wav(ref)]))
+            ref, ref_text = joined, f"{info.get('reference_text', CALM_REFERENCE_TEXT)} {ref_text}"
+    if style in engine.styles and STYLES[style].keep_voice and engine.fingerprint:
         import mlx.core as mx
 
         fingerprint = model.extract_speaker_embedding

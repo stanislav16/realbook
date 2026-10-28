@@ -28,7 +28,7 @@ How the text is marked: every quotation starts with a tag like {{12:34 paul}}. "
 What to check:
 1. Speakers. For every quotation, is the current speaker right? Use speech tags, who is addressed, the flow of the conversation, and your knowledge of the book. Watch for: a name inside a quotation usually being the person spoken TO; one person speaking several times in a row; characters called by a title ("the Reverend Mother", "the Duke").
 2. Characters. Are gender, age group and accent right? Is anyone listed twice (merge them)? Is a character's name a vague description ("The old woman") when the book gives a better one ("Reverend Mother")? Are there "characters" that aren't people (merge them into the right person, or set their lines to "?")?
-3. Voices. For each main character, how should they sound? Give "sound" (2-3 words about the voice itself, e.g. "gravelly, commanding") and "manner" (a few words about how they speak, e.g. "with sly amusement"). Avoid the words warm, soft, husky, rich, low, quiet, breathy and whisper (they make the voices muffled).
+3. Voices. For each main character, how does their voice sound? Give "sound": 2-3 words about the voice itself, from the book where it says (e.g. "sweet, musical tenor", "gravelly"), not about their personality or behaviour. Voices are read naturally; lines the book says are whispered, shouted or pleaded are read that way automatically, so don't describe acting. Avoid the words warm, soft, husky, rich, low, quiet, breathy and whisper (they make the voices muffled).
 4. Pronunciation. A text-to-speech voice guesses at unusual names and may say them differently each time. For names it could get wrong, give a respelling that an English reader would say correctly: one word spelled with ordinary letters, no hyphens, capitals for stress or phonetic symbols. When the name sounds like a real English word, use that word: voices say real words the same way every time, but can still guess at a made-up spelling, above all a short one on its own (e.g. "Piter": "Peter", "Feyd": "Fade", "Atreides": "Atraydeez", "Gesserit": "Guesserit"). Give a hyphenated name its own entry if its parts are respelled differently ("Feyd-Rautha": "Fayd-Rawthuh"). Leave out names that are pronounced the way they look.
 
 Reply with ONE JSON code block and nothing else needed. Include ONLY changes. Format:
@@ -39,10 +39,10 @@ Reply with ONE JSON code block and nothing else needed. Include ONLY changes. Fo
   "book": "{book_id}",
   "speakers": {{"12:34": "jessica", "12:35": "?"}},
   "characters": {{
-    "the-old-woman": {{"name": "Reverend Mother", "gender": "female", "age": "old", "accent": "", "pitch": "medium", "pace": "slow", "sound": "dry, commanding", "manner": "with cold authority"}}
+    "the-old-woman": {{"name": "Reverend Mother", "gender": "female", "age": "old", "accent": "", "pitch": "medium", "pace": "slow", "sound": "dry, cracked"}}
   }},
   "new_characters": {{
-    "duncan": {{"name": "Duncan Idaho", "gender": "male", "age": "adult", "accent": "", "pitch": "medium", "pace": "normal", "sound": "bright, easy", "manner": "with a soldier's swagger"}}
+    "duncan": {{"name": "Duncan Idaho", "gender": "male", "age": "adult", "accent": "", "pitch": "medium", "pace": "normal", "sound": "bright, easy"}}
   }},
   "merge": {{"paul-s-mother": "jessica"}},
   "pronunciations": {{"Piter": "Peter"}}
@@ -51,7 +51,7 @@ Reply with ONE JSON code block and nothing else needed. Include ONLY changes. Fo
 
 Rules for the reply:
 - Speaker values must be a character id from the list, an id you add under "new_characters", or "?".
-- "characters" entries may contain any of: name, gender (male/female/unknown), age (child = under 13, young = 13-29, adult = 30-59, old = 60+), accent (one of: {accents}; "" if the book gives none), pitch (low/medium/high), pace (slow/normal/fast), sound, manner.
+- "characters" entries may contain any of: name, gender (male/female/unknown), age (child = under 13, young = 13-29, adult = 30-59, old = 60+), accent (one of: {accents}; "" if the book gives none), pitch (low/medium/high), pace (slow/normal/fast), sound.
 - "merge" maps a duplicate's id to the id of the same person; its lines move there.
 - "pronunciations" maps a name as written in the book to how to say it.
 - Leave out everything that is already right. If nothing needs changing, reply with "speakers": {{}}.

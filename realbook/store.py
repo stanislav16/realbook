@@ -201,7 +201,8 @@ def recast_all() -> None:
 
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
 PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
-CAST_VERSION = 4  # bump when voice descriptions or design settings change; prepare() re-casts every book
+CAST_VERSION = 5  # bump when voice descriptions or design settings change; prepare() re-casts every book
+#                   5: neutral delivery, no manners in descriptions
 SPEAKERS_VERSION = 5  # 2: pronouns ("She's") had become characters; 3: so had things ("the memory");
 #                       4: a paragraph's quotes split between speakers by the AI are joined again;
 #                       5: "said the man" right after someone was addressed by name is that person

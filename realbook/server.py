@@ -314,9 +314,12 @@ def design_voice(book_id: str, who: str, d: Design):
         if person is None:
             raise HTTPException(404, "Character not found")
         if d.description is not None:
-            if d.description.strip():
-                person["voice_description"] = d.description.strip()[:600]
-            else:
+            text = d.description.strip()[:600]
+            own = {k: v for k, v in person.items() if k != "voice_description"}
+            automatic = designed.NARRATOR_DESCRIPTION if who == "narrator" else designed.describe_character(own)
+            if text and text != automatic:
+                person["voice_description"] = text
+            else:  # unchanged (or empty): keep following the book, so later improvements still apply
                 person.pop("voice_description", None)
         if d.new_take:
             person["voice_take"] = person.get("voice_take", 0) + 1

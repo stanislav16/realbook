@@ -661,7 +661,7 @@ function designControls(person, who, text) {
   const area = el("textarea", { class: "design-text", rows: 3, spellcheck: "false",
     placeholder: "e.g. An old fisherman with a rough, low voice and a strong Irish accent" }, person.designed_from || "");
   return [
-    el("label", { class: "design" }, el("span", {}, "Voice description"), area),
+    el("label", { class: "design" }, el("span", {}, person.voice_description ? "Your description (used instead of the book's)" : "Voice description, from the book"), area),
     el("div", { class: "design-actions" },
       el("button", { class: "button small", title: "Design a voice from this description", onclick: () => designVoice(who, { description: area.value }, text) }, "Use Description"),
       el("button", { class: "button small", title: "Same description, a different voice", onclick: () => designVoice(who, { new_take: true }, text) }, "New Take"),

@@ -123,7 +123,7 @@ def _run(book_id: str) -> None:
         if job["cancel"]:
             raise Cancelled
         # Not urgent: if someone is listening at the same time, their lines go first.
-        path = tts.synthesize(audio, text, v["voice"], v["rate"], v.get("pitch_shift", 0), urgent=False)
+        path = tts.synthesize(audio, store.spoken(book, text), v["voice"], v["rate"], v.get("pitch_shift", 0), urgent=False)
         return _pcm(path)
 
     try:

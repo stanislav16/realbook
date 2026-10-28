@@ -225,6 +225,7 @@ def get_book(book_id: str):
         "cast": b["characters"],
         "toc": [{"title": c["title"], "section": c.get("section", ""), "segments": len(c["segments"])} for c in b["chapters"]],
         "ai_done": b.get("ai_done", {}),
+        "pronunciations": b.get("pronunciations", {}),
         "job": jobs.get(book_id),
     }
 
@@ -336,6 +337,20 @@ def design_voice(book_id: str, who: str, d: Design):
 
 class CharacterChange(BaseModel):
     name: str
+
+
+class Pronunciations(BaseModel):
+    words: dict[str, str]
+
+
+@app.put("/api/books/{book_id}/pronunciations")
+def set_pronunciations(book_id: str, req: Pronunciations):
+    """How the voices should say this book's unusual names: {"Piter": "Peter"}."""
+    b = _book(book_id)
+    with store.lock(book_id):
+        b["pronunciations"] = store.clean_pronunciations(req.words)
+        store.save(b)
+    return b["pronunciations"]
 
 
 @app.patch("/api/books/{book_id}/characters/{char_id}")
@@ -574,7 +589,7 @@ def review_import(book_id: str, r: ReviewImport):
         except ValueError as e:
             raise HTTPException(400, str(e))
         store.save(b)
-    return {**result, "cast": b["characters"], "narrator": b["narrator"]}
+    return {**result, "cast": b["characters"], "narrator": b["narrator"], "pronunciations": b.get("pronunciations", {})}
 
 
 # ----------------------------------------------------------------- export
@@ -635,7 +650,7 @@ def segment_audio(book_id: str, n: int, sid: int, prefetch: int = 0):
         raise HTTPException(404, "Segment not found")
     seg = ch["segments"][sid]
     v = store.voice_for(b, seg)
-    path = tts.synthesize(store.audio_dir(book_id), seg["text"], v["voice"], v["rate"], v["pitch_shift"], urgent=not prefetch)
+    path = tts.synthesize(store.audio_dir(book_id), store.spoken(b, seg["text"]), v["voice"], v["rate"], v["pitch_shift"], urgent=not prefetch)
     return FileResponse(path, media_type=system.AUDIO_TYPE, headers={"Cache-Control": "no-cache"})
 
 

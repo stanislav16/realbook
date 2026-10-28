@@ -745,7 +745,46 @@ function castMenu(anchor) {
     { label: S.config.claude ? "Analyze with Claude…" : "Analyze with Claude (add a key in Settings)", disabled: busy || !S.config.claude, action: () => analyze("claude") },
     "-",
     { label: "Add Character…", action: () => newCharacter() },
+    { label: "Pronunciations…", action: () => editPronunciations() },
   ]);
+}
+
+// How the voices should say unusual names ("Piter" → "Peter"), so they say them the same way every time.
+async function editPronunciations(word = "") {
+  const b = S.book;
+  const rows = el("div", { class: "say-rows" });
+  const speakerOf = (w) => b.cast.find((c) => [c.name, ...(c.aliases || [])].some((n) => n.split(/\s+/).includes(w))) || b.narrator;
+  const addRow = (w = "", say = "") => {
+    const word = el("input", { value: w, placeholder: "As written", autocomplete: "off", spellcheck: "false" });
+    const how = el("input", { value: say, placeholder: "Say it like", autocomplete: "off", spellcheck: "false" });
+    const row = el("div", { class: "say-row" }, word, el("span", { class: "muted" }, "→"), how,
+      el("button", { class: "button small", type: "button", title: "Listen", onclick: () => {
+        const p = speakerOf(word.value.trim());
+        if (how.value.trim()) preview({ voice: p.voice, rate: p.rate ?? 100, pitch_shift: p.pitch_shift || 0 }, `${how.value.trim()}.`);
+      } }, "▶"),
+      el("button", { class: "button small", type: "button", title: "Remove", onclick: () => row.remove() }, "×"));
+    rows.append(row);
+    return how;
+  };
+  for (const [w, say] of Object.entries(b.pronunciations || {})) addRow(w, say);
+  const focus = word && !(word in (b.pronunciations || {})) ? addRow(word) : null;
+  if (!rows.children.length) addRow();
+  const go = ask({ title: "Pronunciations", ok: "Save", body: el("div", {},
+    el("p", { class: "muted" }, "Voices guess at unusual names and can say them differently each time. Spell a name the way it should sound, and every voice will say it that way."),
+    rows,
+    el("button", { class: "button", type: "button", onclick: () => addRow().previousSibling.previousSibling.focus() }, "Add Name"),
+    el("p", { class: "muted small" }, "Use ordinary spelling, like “Peter” for Piter. ▶ plays it with the voice of whoever has that name.")) });
+  if (focus) setTimeout(() => focus.focus(), 50);
+  if (!(await go)) return;
+  const words = {};
+  for (const r of rows.querySelectorAll(".say-row")) {
+    const [w, say] = [...r.querySelectorAll("input")].map((i) => i.value.trim());
+    if (w && say) words[w] = say;
+  }
+  try {
+    b.pronunciations = await api(`/api/books/${b.id}/pronunciations`, { method: "PUT", json: { words } });
+    toast("Saved. Lines are re-read with the new pronunciations.");
+  } catch (e) { toast(e.message); }
 }
 
 // A package a stronger AI chat (e.g. Claude) can check: every line marked with its id and speaker.
@@ -784,11 +823,11 @@ async function importReview() {
   if (!text || !area.value.trim()) return;
   try {
     const r = await api(`/api/books/${b.id}/review/import`, { method: "POST", json: { text: area.value } });
-    b.cast = r.cast; b.narrator = r.narrator;
+    b.cast = r.cast; b.narrator = r.narrator; b.pronunciations = r.pronunciations;
     b.ai_done = { ...(b.ai_done || {}), review: Date.now() / 1000 };
     S.chapter = await api(`/api/books/${b.id}/chapters/${S.chapterIdx}`);
     voicesChanged(); renderCast(); renderPage(); highlight();
-    const bits = [r.speakers && `${r.speakers} speakers`, r.characters && `${r.characters} characters`, r.added && `${r.added} new`, r.merged && `${r.merged} merged`].filter(Boolean);
+    const bits = [r.speakers && `${r.speakers} speakers`, r.characters && `${r.characters} characters`, r.added && `${r.added} new`, r.merged && `${r.merged} merged`, r.said && `${r.said} pronunciations`].filter(Boolean);
     toast(`Review imported: ${bits.join(", ") || "nothing to change"}${r.skipped_count ? ` (${r.skipped_count} entries didn't match the book and were skipped)` : ""}`, 6000);
   } catch (e) { toast(e.message, 6000); }
 }
@@ -797,6 +836,7 @@ function characterMenu(anchor, c) {
   popupMenu(anchor, [
     { label: "Rename…", action: () => renameCharacter(c) },
     { label: "Merge into…", action: () => mergeCharacter(c) },
+    { label: "Pronunciation…", action: () => editPronunciations(c.name.split(/\s+/).find((w) => /^[A-Z]/.test(w) && !["The", "Lady", "Duke", "Baron", "Dr.", "Reverend", "Mother", "Princess", "Emperor"].includes(w)) || c.name.split(/\s+/)[0]) },
     "-",
     { label: "Remove", danger: true, action: () => removeCharacter(c) },
   ]);

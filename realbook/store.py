@@ -391,6 +391,27 @@ def prepare() -> None:
     save_settings(values)
 
 
+def clean_pronunciations(raw: dict) -> dict[str, str]:
+    """{word as written: how to say it}, tidied: one word or name each, nothing empty or unchanged."""
+    out = {}
+    for word, say in (raw or {}).items():
+        word, say = " ".join(str(word).split())[:40], " ".join(str(say).split())[:60]
+        if word and say and word != say and re.fullmatch(r"[\w'’.-]+(?: [\w'’.-]+)*", word):
+            out[word] = say
+    return out
+
+
+def spoken(book: dict, text: str) -> str:
+    """`text` as the voices should say it: the book's names respelled the way they're pronounced
+    ("Piter" → "Peter"), so every voice says them the same way every time."""
+    say = book.get("pronunciations") or {}
+    if not say:
+        return text
+    rx = re.compile(r"(?<![\w'’])(%s)(?![\w])" % "|".join(re.escape(w) for w in sorted(say, key=len, reverse=True)), re.IGNORECASE)
+    lower = {w.lower(): s for w, s in say.items()}
+    return rx.sub(lambda m: lower[m.group(1).lower()], text)
+
+
 def voice_for(book: dict, seg: dict) -> dict:
     if seg["kind"] == "dialogue" and seg.get("speaker"):
         for c in book["characters"]:

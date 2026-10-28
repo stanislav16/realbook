@@ -83,6 +83,9 @@ class Engine:
     licence_note: str = ""
     speed_note: str = ""
     design_version: int = 1  # bump when design settings change, so voices are designed again
+    # Re-design voices that come out muffled or the wrong pitch for their gender (Breeze needs this;
+    # Qwen's voices are clear, and checking them only costs time).
+    check_quality: bool = False
     install: dict = field(default_factory=lambda: {"state": "idle", "progress": 0.0, "message": ""})
 
     def files(self) -> list[tuple[str, str, str, int, str]]:
@@ -142,6 +145,7 @@ BREEZE = Engine(
     design=lambda m, description: m.generate(text=REFERENCE_TEXT, instruct=description, cfg_scale=1.5),
     read=lambda m, text, ref: m.generate(text=text, ref_audio=str(ref), ref_text=REFERENCE_TEXT),
     design_version=2,  # 2: strictness 1.5 and the quality check
+    check_quality=True,
     licence_note=("Breeze-TTS-2's licence allows research and non-commercial use only: fine for listening to "
                   "your own books, but don't sell or publish what it makes."),
     speed_note="About as fast as listening on a recent Mac, so playback faster than 1× may pause between lines.",
@@ -359,6 +363,8 @@ _worker: threading.Thread | None = None
 _worker_lock = threading.Lock()
 _models: dict[tuple[str, str], object] = {}
 _last_design = 0.0
+_last_line = 0.0  # when a line was last asked for: background designs wait until reading is quiet
+QUIET_SECONDS = 3.0
 _queued_designs: set[str] = set()
 
 
@@ -435,7 +441,7 @@ def _quality(samples: np.ndarray, description: str) -> tuple[float, bool]:
     words = description.lower()
     # Boys and girls have high voices anyway; only grown men are checked for sounding too high.
     off = 0.0
-    if re.search(r"\b(man|gentleman)\b", words):
+    if re.search(r"\b(man|gentleman)\b", words) and not re.search(r"\bhigh\b", words):  # unless meant to be high
         off = max(0.0, pitch - MALE_MAX_PITCH_HZ)
     elif re.search(r"\b(woman|girl)\b", words) and pitch:
         off = max(0.0, FEMALE_MIN_PITCH_HZ - pitch)
@@ -482,31 +488,69 @@ def _write_wav(path: Path, samples: np.ndarray) -> None:
         w.writeframes((samples * 32767).astype("<i2").tobytes())
 
 
-def _design(engine: Engine, key: str) -> Path:
+# Voices partway through their tries: key -> (best samples so far, its score, tries made).
+_candidates: dict[str, tuple[np.ndarray, float, int]] = {}
+
+
+def _design_try(engine: Engine, key: str) -> bool:
+    """Make one try at a voice. True once it's finished (saved), False if another try is wanted.
+
+    Designing is random: now and then a voice comes out muffled, or a man sounds like a woman.
+    Engines that check quality try again, up to DESIGN_ATTEMPTS times, and keep the best.
+    """
     global _last_design
     ref = voices_dir(engine) / f"{key}.wav"
     if ref.exists():
-        return ref
-    info = json.loads((voices_dir(engine) / f"{key}.json").read_text())
-    # Designing is random: now and then a voice comes out muffled, or a man sounds like a woman.
-    # Try again, and keep the best.
-    best, best_score = None, float("-inf")
-    for _ in range(DESIGN_ATTEMPTS):
-        samples = _generate(engine.design(_model(engine, engine.design_role), info["description"]))
-        score, good = _quality(samples, info["description"])
-        if score > best_score:
-            best, best_score = samples, score
-        if good:
-            break
-    samples = best
+        return True
+    description = json.loads((voices_dir(engine) / f"{key}.json").read_text())["description"]
+    samples = _generate(engine.design(_model(engine, engine.design_role), description))
     _last_design = time.monotonic()
+    score, good = _quality(samples, description) if engine.check_quality else (0.0, True)
+    best, best_score, tries = _candidates.get(key, (samples, score, 0))
+    if score >= best_score:
+        best, best_score = samples, score
+    tries += 1
+    if not good and tries < DESIGN_ATTEMPTS:
+        _candidates[key] = (best, best_score, tries)
+        return False
+    _candidates.pop(key, None)
     tmp = ref.with_suffix(".tmp.wav")
-    _write_wav(tmp, samples)
+    _write_wav(tmp, best)
     tmp.rename(ref)
-    return ref
+    return True
+
+
+def _design(engine: Engine, key: str) -> Path:
+    """The voice's reference clip, designing it now if needed (all its tries at once)."""
+    while not _design_try(engine, key):
+        pass
+    return voices_dir(engine) / f"{key}.wav"
+
+
+def _design_in_background(engine: Engine, name: str) -> None:
+    """One try, then back in the queue: a line someone is waiting for can go first between tries.
+
+    While lines are being asked for, it doesn't start at all: a try takes 8-25 seconds and can't
+    be interrupted, so it would hold up the line being waited for.
+    """
+    if time.monotonic() - _last_line < QUIET_SECONDS:
+        threading.Timer(1.0, _submit, args=(BACKGROUND, _design_in_background, engine, name)).start()
+        return
+    if _design_try(engine, _key(name)):
+        _queued_designs.discard(name)
+    else:
+        _submit(BACKGROUND, _design_in_background, engine, name)
 
 
 def _speak(engine: Engine, out: Path, text: str, key: str) -> None:
+    global _last_line
+    try:
+        _speak_line(engine, out, text, key)
+    finally:
+        _last_line = time.monotonic()  # quiet is measured from when a line finished
+
+
+def _speak_line(engine: Engine, out: Path, text: str, key: str) -> None:
     ref = _design(engine, key)
     samples = _generate(engine.read(_model(engine, engine.read_role), text, ref))
     with tempfile.NamedTemporaryFile(suffix=".wav", dir=out.parent, delete=False) as tmp:
@@ -517,6 +561,8 @@ def _speak(engine: Engine, out: Path, text: str, key: str) -> None:
 
 def synthesize(out: Path, text: str, voice: str, urgent: bool = True) -> None:
     """Render `text` in a designed voice to an audio file at `out` (designing the voice first if needed)."""
+    global _last_line
+    _last_line = time.monotonic()
     _submit(URGENT if urgent else PREFETCH, _speak, engine_of(voice), out, text, _key(voice)).result()
 
 
@@ -531,5 +577,5 @@ def design_ahead(voice_names: list[str]) -> None:
         engine = engine_of(name)
         if engine and not designed(name) and name not in _queued_designs:
             _queued_designs.add(name)
-            _submit(BACKGROUND, _design, engine, _key(name)).add_done_callback(
-                lambda _, n=name: _queued_designs.discard(n))
+            _submit(BACKGROUND, _design_in_background, engine, name).add_done_callback(
+                lambda f, n=name: f.exception() and _queued_designs.discard(n))

@@ -201,7 +201,7 @@ def recast_all() -> None:
 
 SEGMENTS_VERSION = 2  # bump when segmentation rules change; prepare() re-chunks existing books
 PROFILE_VERSION = 2  # bump when the free analyzer's voice profiling changes; prepare() re-profiles books
-CAST_VERSION = 2  # bump when voice descriptions or design settings change; prepare() re-casts every book
+CAST_VERSION = 3  # bump when voice descriptions or design settings change; prepare() re-casts every book
 SPEAKERS_VERSION = 2  # 2: pronouns ("She's") had become characters; prepare() hands their lines out again
 
 
@@ -309,6 +309,10 @@ def prepare() -> None:
         save_settings(values)
     if values.get("cast_version", 1) < CAST_VERSION:
         recast_all()  # voices you picked by hand are kept
+        from . import designed
+
+        in_use = {p["voice"] for s in list_books() for b in [load(s["id"])] for p in [b["narrator"], *b["characters"]]}
+        designed.prune(in_use)  # the voices replaced by this re-cast
         values["cast_version"] = CAST_VERSION
         save_settings(values)
     if values.get("segments_version", 1) >= SEGMENTS_VERSION:

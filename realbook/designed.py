@@ -46,9 +46,14 @@ MLX_CACHE_LIMIT = 512 * 1024 * 1024
 # Words like "warm", "soft", "husky" and "rich" make Breeze's voices muffled; these keep them clear.
 NARRATOR_DESCRIPTION = ("An adult woman with a bright, clear voice and a neutral American accent, "
                         "reading a story aloud with feeling.")
-# Spoken by every designed voice; lines are cloned from it.
-REFERENCE_TEXT = ("I have been thinking about it all morning, and I suppose there is no better time to tell you. "
-                  "Some things are easier to say out loud than to keep to yourself.")
+# Spoken by every designed voice; lines are cloned from it. It has a statement, an exclamation and
+# a question, so the clone hears how this voice exclaims and asks: with a calm sample, "!" often
+# came out rising like a question (a blind listening test preferred this in 8 of 8 lines).
+REFERENCE_TEXT = ("I have been thinking about it all morning. Listen to me! This is important, and I won't say "
+                  "it twice. Do you understand? Good. Then let's go!")
+# What voices designed before that change say in their sample; they're still cloned with it.
+CALM_REFERENCE_TEXT = ("I have been thinking about it all morning, and I suppose there is no better time to tell you. "
+                       "Some things are easier to say out loud than to keep to yourself.")
 ACCENT_WORDS = {"south_african": "South African"}
 TIMBRES = ["bright", "clear", "expressive", "lively", "crisp", "slightly raspy"]
 # Every new voice is checked: muffled (95% of its sound below this), or a man who sounds like a woman
@@ -80,7 +85,7 @@ class Engine:
     design_role: str
     read_role: str
     design: Callable  # (model, description) -> generator of audio chunks
-    read: Callable  # (model, text, reference clip) -> generator of audio chunks
+    read: Callable  # (model, text, reference clip, what the clip says) -> generator of audio chunks
     licence_note: str = ""
     speed_note: str = ""
     design_version: int = 1  # bump when design settings change, so voices are designed again
@@ -117,7 +122,8 @@ QWEN = Engine(
     },
     design_role="designer", read_role="reader",
     design=lambda m, description: m.generate_voice_design(text=REFERENCE_TEXT, instruct=description, language="English"),
-    read=lambda m, text, ref: m.generate(text=text, ref_audio=str(ref), ref_text=REFERENCE_TEXT, lang_code="english"),
+    read=lambda m, text, ref, ref_text: m.generate(text=text, ref_audio=str(ref), ref_text=ref_text, lang_code="english"),
+    design_version=2,  # 2: the expressive sample
     speed_note="About twice as fast as listening on a recent Mac.",
 )
 
@@ -144,8 +150,8 @@ BREEZE = Engine(
     # Following the description strictly (Breeze's suggested 4) makes voices muffled and "underwater";
     # 1.5 is clear and, with gender stated in the description, still follows it.
     design=lambda m, description: m.generate(text=REFERENCE_TEXT, instruct=description, cfg_scale=1.5),
-    read=lambda m, text, ref: m.generate(text=text, ref_audio=str(ref), ref_text=REFERENCE_TEXT),
-    design_version=2,  # 2: strictness 1.5 and the quality check
+    read=lambda m, text, ref, ref_text: m.generate(text=text, ref_audio=str(ref), ref_text=ref_text),
+    design_version=3,  # 2: strictness 1.5 and the quality check; 3: the expressive sample
     check_quality=True,
     licence_note=("Breeze-TTS-2's licence allows research and non-commercial use only: fine for listening to "
                   "your own books, but don't sell or publish what it makes."),
@@ -357,6 +363,18 @@ def describe(voice: str) -> dict | None:
             "quality": 5, "novelty": False, "engine": engine.name, "description": info["description"]}
 
 
+def prune(in_use: set[str]) -> int:
+    """Delete designed voices no book uses any more (they're made again if ever needed). Returns how many."""
+    removed = 0
+    for engine in ENGINES.values():
+        for info in voices_dir(engine).glob("*.json") if voices_dir(engine).exists() else []:
+            if f"{engine.name}:{info.stem}" not in in_use:
+                info.unlink(missing_ok=True)
+                info.with_suffix(".wav").unlink(missing_ok=True)
+                removed += 1
+    return removed
+
+
 def designed(voice: str) -> bool:
     return (voices_dir(engine_of(voice)) / f"{_key(voice)}.wav").exists()
 
@@ -525,6 +543,10 @@ def _design_try(engine: Engine, key: str) -> bool:
         _candidates[key] = (best, best_score, tries)
         return False
     _candidates.pop(key, None)
+    info_path = voices_dir(engine) / f"{key}.json"
+    info = json.loads(info_path.read_text())
+    info["reference_text"] = REFERENCE_TEXT  # cloning must use exactly what the sample says
+    info_path.write_text(json.dumps(info))
     tmp = ref.with_suffix(".tmp.wav")
     _write_wav(tmp, best)
     tmp.rename(ref)
@@ -563,7 +585,9 @@ def _speak(engine: Engine, out: Path, text: str, key: str) -> None:
 
 def _speak_line(engine: Engine, out: Path, text: str, key: str) -> None:
     ref = _design(engine, key)
-    samples = _generate(engine.read(_model(engine, engine.read_role), text, ref))
+    info = json.loads((voices_dir(engine) / f"{key}.json").read_text())
+    ref_text = info.get("reference_text", CALM_REFERENCE_TEXT)  # voices made before samples were recorded with it
+    samples = _generate(engine.read(_model(engine, engine.read_role), text, ref, ref_text))
     with tempfile.NamedTemporaryFile(suffix=".wav", dir=out.parent, delete=False) as tmp:
         wav = Path(tmp.name)
     _write_wav(wav, samples)

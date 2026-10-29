@@ -177,21 +177,43 @@ async function showLibrary() {
 function renderLibrary() {
   $$(".nav-item[data-filter]").forEach((b) => b.classList.toggle("current", b.dataset.filter === S.filter));
   $("#lib-title").textContent = FILTER_TITLES[S.filter];
-  $("#library").classList.toggle("phone-view", S.filter === "phone");
   clearTimeout(S.phoneTimer);
-  if (S.filter === "phone") return renderPhone();
+  if (S.filter === "phone") {
+    // Straight to the tab (as it last looked), never the library's covers in the tab's layout.
+    $("#books").replaceChildren(S.phonePage || el("div", { class: "phone-page" }));
+    renderContinue(null);
+    $("#library").classList.add("phone-view");
+    return renderPhone();
+  }
+  $("#library").classList.remove("phone-view");
   const q = $("#search").value.trim().toLowerCase();
   let books = S.books.filter((b) => !q || `${b.title} ${b.author}`.toLowerCase().includes(q));
   if (S.filter === "reading") books = books.filter((b) => b.progress > 0 && !b.finished).sort((a, b) => b.opened - a.opened);
   if (S.filter === "finished") books = books.filter((b) => b.finished);
   const grid = $("#books");
   grid.replaceChildren(...books.map(bookTile));
+  renderContinue(q ? null : S.books.filter((b) => b.progress > 0 && !b.finished).sort((a, b) => b.opened - a.opened)[0]);
   if (!books.length) {
     grid.append(el("div", { class: "empty" }, q ? "No books match your search."
       : S.filter === "reading" ? "Books you've started will appear here."
       : S.filter === "finished" ? "Books you finish will appear here."
       : "No books yet. Click Add Book, or drop an EPUB or text file here."));
   }
+}
+
+// The book you're in, at the top of the library, to carry on with one click.
+function renderContinue(b) {
+  const box = $("#continue");
+  if (!b || S.filter === "phone" || S.filter === "finished") return box.replaceChildren();
+  const pct = Math.max(1, Math.round(b.progress * 100));
+  box.replaceChildren(el("div", { class: "continue" },
+    el("button", { class: "cover", onclick: () => openBook(b.id) }, coverEl(b)),
+    el("div", { class: "continue-info" },
+      el("div", { class: "continue-label" }, "Continue listening"),
+      el("div", { class: "continue-title" }, b.title),
+      el("div", { class: "continue-meta" }, [b.author, `Chapter ${b.position.chapter + 1} of ${b.chapters}`, `${pct}%`].filter(Boolean).join(" · ")),
+      el("div", { class: "track" }, el("b", { style: `width:${pct}%` })),
+      el("button", { class: "button primary", type: "button", onclick: async () => { await openBook(b.id); play(); } }, "▶︎  Resume"))));
 }
 
 /* ------------------------------------------------------------- iPhone tab */
@@ -208,6 +230,11 @@ async function renderPhone() {
     return grid.replaceChildren(el("div", { class: "empty" }, e.message));
   }
   if (S.filter !== "phone") return;
+  // While an offline copy is being made this runs every 2 s: redraw only when something changed,
+  // so the covers don't flicker.
+  const state = JSON.stringify([r, books]);
+  const unchanged = state === S.phoneState && S.phonePage?.isConnected;
+  S.phoneState = state;
   const refresh = () => { if (S.filter === "phone" && !$("#library").classList.contains("hidden")) renderPhone(); };
   const toggle = (on) => async () => {
     try { await api("/api/remote", { method: "POST", json: { enabled: on } }); refresh(); } catch (e) { toast(e.message); }
@@ -252,7 +279,10 @@ async function renderPhone() {
   const copies = el("section", { class: "phone-card" }, el("h4", {}, "Offline copies"),
     el("p", { class: "muted small" }, "The iPhone app plays a book offline from its offline copy: the whole book made into audio once, with the current voices. Making one takes as long as the voices need for lines you haven't listened to yet, so a long book can take hours; this Mac needs to stay on meanwhile."),
     ...rows);
-  grid.replaceChildren(el("div", { class: "phone-page" }, pairing, copies));
+  if (!unchanged) {
+    S.phonePage = el("div", { class: "phone-page" }, pairing, copies);
+    grid.replaceChildren(S.phonePage);
+  }
   if (running) S.phoneTimer = setTimeout(refresh, 2000);
 }
 
@@ -268,8 +298,10 @@ function coverEl(b) {
 }
 
 function bookTile(b) {
+  const pct = Math.max(1, Math.round(b.progress * 100));
   const status = b.finished ? el("span", {}, "Finished")
-    : b.progress > 0 ? el("span", {}, `${Math.max(1, Math.round(b.progress * 100))}%`)
+    : b.progress > 0 ? el("span", { class: "tile-progress", title: `${pct}% listened` },
+      el("span", { class: "track" }, el("b", { style: `width:${pct}%` })), `${pct}%`)
     : el("span", { class: "badge-new" }, "NEW");
   const more = el("button", { class: "more-btn", title: "More", onclick: (e) => {
     e.stopPropagation();

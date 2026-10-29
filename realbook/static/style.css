@@ -1,7 +1,7 @@
 /* RealBook: macOS-native look, with reading themes for the page. */
 :root {
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-  --accent: #ff9500;
+  --accent: #2c2c2e;  /* graphite: colour is kept for the speakers */
   --accent-ink: #fff;
   --label: #1d1d1f;
   --secondary: #6e6e73;
@@ -21,7 +21,8 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --accent: #ff9f0a;
+    --accent: #e5e5ea;
+    --accent-ink: #1c1c1e;
     --label: #f5f5f7;
     --secondary: #98989d;
     --tertiary: #636366;
@@ -72,7 +73,8 @@ select:focus, input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accen
 .sidebar-label { font-size: 11px; font-weight: 600; color: var(--secondary); padding: 6px 8px 4px; }
 .sidebar-label:not(:first-child) { margin-top: 14px; }
 .nav-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; text-align: left; font-size: 13px; }
-.nav-item svg { width: 17px; height: 17px; color: var(--accent); }
+.nav-item svg { width: 17px; height: 17px; color: var(--secondary); }
+.nav-item.current svg { color: var(--label); }
 .nav-item:hover { background: var(--fill); }
 .nav-item.current { background: var(--selected); font-weight: 600; }
 .library-main { display: flex; flex-direction: column; min-width: 0; }
@@ -93,7 +95,22 @@ select:focus, input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accen
 .gen-title { font-family: ui-serif, "New York", Georgia, serif; font-size: 17px; line-height: 1.2; font-weight: 600; overflow-wrap: anywhere; }
 .gen-author { margin-top: auto; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; opacity: .85; }
 .tile-meta { display: flex; align-items: center; justify-content: space-between; height: 18px; font-size: 11px; color: var(--secondary); font-weight: 500; }
-.badge-new { padding: 1px 6px; border-radius: 4px; background: #0a84ff; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .03em; }
+.badge-new { padding: 1px 6px; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 700; letter-spacing: .03em; }
+.tile-progress { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; margin-right: 6px; }
+.tile-progress .track { flex: 1; height: 3px; border-radius: 2px; background: var(--fill-strong); overflow: hidden; }
+.tile-progress .track b { display: block; height: 100%; background: var(--label); opacity: .55; border-radius: 2px; }
+
+/* Continue listening */
+.continue { display: flex; gap: 20px; align-items: center; margin: 4px 0 30px; padding: 18px; border-radius: 14px; background: var(--fill); max-width: 720px; }
+.continue .cover { width: 84px; flex: none; }
+.continue-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.continue-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--secondary); }
+.continue-title { font: 600 19px/1.25 "New York", "Iowan Old Style", Georgia, serif; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.continue-meta { font-size: 12px; color: var(--secondary); }
+.continue .track { height: 4px; border-radius: 2px; background: var(--fill-strong); overflow: hidden; margin: 8px 0 2px; max-width: 320px; }
+.continue .track b { display: block; height: 100%; background: var(--label); opacity: .6; }
+.continue .button { align-self: flex-start; margin-top: 8px; }
+@media (max-width: 640px) { .continue { padding: 14px; gap: 14px; } .continue .cover { width: 64px; } }
 .more-btn { border: 0; background: none; color: var(--secondary); font-size: 14px; letter-spacing: 1px; padding: 0 2px; border-radius: 4px; line-height: 1; }
 .more-btn:hover { background: var(--fill); }
 .empty { grid-column: 1 / -1; padding: 60px 0; text-align: center; color: var(--secondary); font-size: 14px; }
@@ -104,14 +121,14 @@ body.dragging .drop { display: block; }
 .voice-banner strong { font-size: 13px; }
 
 /* ------------------------------------------------------------------ reader themes */
-.reader { --page-bg: #ffffff; --page-ink: #1d1d1f; --page-muted: #86868b; --page-hl: rgba(255, 149, 0, .2); --material: rgba(246, 246, 246, .82); --page-line: rgba(0, 0, 0, .08); }
+.reader { --page-bg: #ffffff; --page-ink: #1d1d1f; --page-muted: #86868b; --page-hl: rgba(0, 0, 0, .07); --material: rgba(246, 246, 246, .82); --page-line: rgba(0, 0, 0, .08); }
 @media (prefers-color-scheme: dark) {
-  .reader[data-theme=original] { --page-bg: #1e1e1e; --page-ink: #e5e5e7; --page-muted: #8e8e93; --page-hl: rgba(255, 159, 10, .26); --material: rgba(44, 44, 46, .82); --page-line: rgba(255, 255, 255, .1); }
+  .reader[data-theme=original] { --page-bg: #1e1e1e; --page-ink: #e5e5e7; --page-muted: #8e8e93; --page-hl: rgba(255, 255, 255, .11); --material: rgba(44, 44, 46, .82); --page-line: rgba(255, 255, 255, .1); }
 }
-.reader[data-theme=paper] { --page-bg: #f3f0e8; --page-ink: #2b2925; --page-muted: #8c867a; --page-hl: rgba(214, 140, 40, .22); --material: rgba(234, 230, 220, .85); --page-line: rgba(60, 50, 30, .1); }
-.reader[data-theme=sepia] { --page-bg: #f1e4c9; --page-ink: #3d2f1f; --page-muted: #957d5c; --page-hl: rgba(200, 120, 30, .24); --material: rgba(232, 218, 190, .85); --page-line: rgba(80, 55, 20, .12); }
-.reader[data-theme=gray] { --page-bg: #48484b; --page-ink: #e0e0e0; --page-muted: #a5a5aa; --page-hl: rgba(255, 179, 64, .25); --material: rgba(60, 60, 63, .85); --page-line: rgba(255, 255, 255, .1); color-scheme: dark; }
-.reader[data-theme=night] { --page-bg: #000000; --page-ink: #c8c8cc; --page-muted: #7c7c80; --page-hl: rgba(255, 159, 10, .24); --material: rgba(28, 28, 30, .85); --page-line: rgba(255, 255, 255, .1); color-scheme: dark; }
+.reader[data-theme=paper] { --page-bg: #f3f0e8; --page-ink: #2b2925; --page-muted: #8c867a; --page-hl: rgba(70, 50, 20, .1); --material: rgba(234, 230, 220, .85); --page-line: rgba(60, 50, 30, .1); }
+.reader[data-theme=sepia] { --page-bg: #f1e4c9; --page-ink: #3d2f1f; --page-muted: #957d5c; --page-hl: rgba(80, 50, 15, .12); --material: rgba(232, 218, 190, .85); --page-line: rgba(80, 55, 20, .12); }
+.reader[data-theme=gray] { --page-bg: #48484b; --page-ink: #e0e0e0; --page-muted: #a5a5aa; --page-hl: rgba(255, 255, 255, .12); --material: rgba(60, 60, 63, .85); --page-line: rgba(255, 255, 255, .1); color-scheme: dark; }
+.reader[data-theme=night] { --page-bg: #000000; --page-ink: #c8c8cc; --page-muted: #7c7c80; --page-hl: rgba(255, 255, 255, .1); --material: rgba(28, 28, 30, .85); --page-line: rgba(255, 255, 255, .1); color-scheme: dark; }
 .reader { background: var(--page-bg); color: var(--page-ink); display: flex; flex-direction: column; }
 
 /* toolbar */
@@ -223,7 +240,7 @@ body.native.mac .reader-toolbar { padding-left: 84px; }  /* room for the window 
 /* menus, dialogs, toasts */
 .menu { position: fixed; z-index: 50; min-width: 200px; max-height: 60vh; overflow-y: auto; padding: 5px; border-radius: 8px; background: color-mix(in srgb, var(--window) 92%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: var(--shadow-pop); color: var(--label); }
 .menu button { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 10px; border: 0; border-radius: 4px; background: none; text-align: left; font-size: 13px; }
-.menu button:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.menu button:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
 .menu button:disabled { color: var(--tertiary); }
 .menu button.danger { color: var(--danger); }
 .menu button.danger:hover { color: #fff; background: var(--danger); }

@@ -49,7 +49,7 @@ final class MacClient {
     private var working: URL?
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 6
+        config.timeoutIntervalForRequest = 120  // each request sets its own, shorter, timeout
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
@@ -66,8 +66,11 @@ final class MacClient {
         UserDefaults.standard.removeObject(forKey: "pairing")
     }
 
-    private func request(_ path: String, method: String = "GET", body: Data? = nil, base: URL) -> URLRequest {
-        var r = URLRequest(url: base.appendingPathComponent(path))
+    private func request(_ path: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = [],
+                         timeout: TimeInterval = 6, base: URL) -> URLRequest {
+        var parts = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { parts.queryItems = query }
+        var r = URLRequest(url: parts.url!, timeoutInterval: timeout)
         r.httpMethod = method
         r.httpBody = body
         if body != nil { r.setValue("application/json", forHTTPHeaderField: "Content-Type") }
@@ -76,12 +79,14 @@ final class MacClient {
     }
 
     /// Sends a request to whichever of the Mac's addresses answers.
-    func data(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
+    func data(_ path: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = [],
+              timeout: TimeInterval = 6) async throws -> Data {
         guard let pairing else { throw MacError.notPaired }
         let bases = [working].compactMap { $0 } + pairing.bases.filter { $0 != working }
         for base in bases {
             do {
-                let (data, response) = try await session.data(for: request(path, method: method, body: body, base: base))
+                let r = request(path, method: method, body: body, query: query, timeout: timeout, base: base)
+                let (data, response) = try await session.data(for: r)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 working = base
                 if status == 403 { throw MacError.refused("Your Mac didn't accept this iPhone. Pair it again with the code in RealBook's Listen on iPhone tab.") }
@@ -102,6 +107,24 @@ final class MacClient {
 
     func books() async throws -> [RemoteBook] {
         try JSONDecoder().decode([RemoteBook].self, from: await data("api/phone/books"))
+    }
+
+    func book(_ id: String) async throws -> MacBook {
+        try JSONDecoder().decode(MacBook.self, from: await data("api/books/\(id)"))
+    }
+
+    func chapter(_ n: Int, of id: String) async throws -> MacChapter {
+        try JSONDecoder().decode(MacChapter.self, from: await data("api/books/\(id)/chapters/\(n)", timeout: 20))
+    }
+
+    /// One line's audio, made on the Mac if it hasn't been yet (which can take a few seconds).
+    func line(_ segment: Int, chapter: Int, of id: String, ahead: Bool = false) async throws -> Data {
+        try await data("api/books/\(id)/audio/\(chapter)/\(segment)", query: ahead ? [URLQueryItem(name: "prefetch", value: "1")] : [],
+                       timeout: 120)
+    }
+
+    func cover(_ id: String) async throws -> Data {
+        try await data("api/books/\(id)/cover", timeout: 20)
     }
 
     func startExport(_ id: String) async throws {

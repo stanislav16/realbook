@@ -36,6 +36,8 @@ async def guard_remote(request: Request, call_next):
     if remote.authorised(request.headers.get(remote.HEADER)):  # the iPhone app
         if remote.blocked(request.method, request.url.path):
             return JSONResponse({"detail": "Only possible on the Mac itself"}, status_code=403)
+        if "/audio/" in request.url.path:
+            remote.keep_awake()
         return await call_next(request)
     key = request.query_params.get("key")
     if key and remote.authorised(key):
@@ -703,7 +705,16 @@ def preview(voice: str, rate: int = voices.DEFAULT_RATE, pitch_shift: int = 0, t
 # ------------------------------------------------------------------ pages
 
 
-app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+class AppFiles(StaticFiles):
+    """The app's own files: always checked for a newer copy, so an update shows at once."""
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+app.mount("/static", AppFiles(directory=HERE / "static"), name="static")
 
 
 @app.get("/manifest.webmanifest")
@@ -723,7 +734,7 @@ def manifest(request: Request):
 
 @app.get("/")
 def index():
-    return FileResponse(HERE / "static" / "index.html")
+    return FileResponse(HERE / "static" / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 def prepare_library() -> None:

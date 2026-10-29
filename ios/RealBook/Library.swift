@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 /// The books kept on this iPhone, the Mac's books when it can be reached, and keeping the reading
 /// position in step between the two: whichever was used last wins.
@@ -49,6 +50,23 @@ final class Library {
     }
 
     func book(_ id: String) -> LocalBook? { books.first { $0.id == id } }
+    func remoteBook(_ id: String) -> RemoteBook? { remote.first { $0.id == id } }
+
+    /// A book's cover: from its offline copy, or fetched from the Mac once and kept.
+    func cover(_ id: String) async -> UIImage? {
+        if let image = UIImage(contentsOfFile: Self.cover(of: id).path) { return image }
+        let cached = Self.coverCache.appendingPathComponent("\(id).jpg")
+        if let image = UIImage(contentsOfFile: cached.path) { return image }
+        guard remoteBook(id)?.cover != nil, let data = try? await mac.cover(id) else { return nil }
+        try? data.write(to: cached)
+        return UIImage(data: data)
+    }
+
+    private static let coverCache: URL = {
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Covers")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }()
 
     func timeline(_ id: String) -> Timeline? {
         if let t = timelines[id] { return t }
@@ -66,6 +84,21 @@ final class Library {
         b.positionMs = ms
         b.positionUpdated = Date().timeIntervalSince1970
         save(b)
+    }
+
+    /// Where the reader is when listening live: tells the Mac, and moves the offline copy (if there
+    /// is one) to the same line, so switching between the two carries on from here.
+    func setLivePosition(chapter: Int, segment: Int, of id: String) {
+        let now = Date().timeIntervalSince1970
+        if var b = book(id), let t = timeline(id), !t.lines.isEmpty {
+            b.positionMs = t.ms(chapter: chapter, segment: segment)
+            b.positionUpdated = now
+            save(b)
+        }
+        if let i = remote.firstIndex(where: { $0.id == id }) {
+            remote[i].position = MacPosition(chapter: chapter, segment: segment, updated: now)
+        }
+        Task { _ = try? await mac.send(position: MacPosition(chapter: chapter, segment: segment, updated: now), book: id) }
     }
 
     /// Sends this iPhone's newer positions to the Mac and takes the Mac's newer ones. Returns the ids

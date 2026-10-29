@@ -25,6 +25,8 @@ GAP_LINE, GAP_PARAGRAPH, GAP_TITLE, GAP_CHAPTER = 0.09, 0.32, 0.8, 1.5  # second
 BITRATE = 64000  # mono speech: about 29 MB per hour
 
 _jobs: dict[str, dict] = {}
+# Speakers' colours, by their place in the cast: the same as PALETTE in static/app.js.
+PALETTE = ["#d9480f", "#1c7ed6", "#2b8a3e", "#9c36b5", "#d6336c", "#0c8599", "#a0620a", "#5f3dc4", "#5c940d", "#e03131", "#087f5b", "#7048e8"]
 
 
 class Cancelled(Exception):
@@ -186,6 +188,7 @@ def _run(book_id: str) -> None:
             "version": 1, "made": time.time(), "ms": caf.ms, "title": book["title"], "author": book["author"],
             "chapters": [{"ms": ms, "title": title, "chapter": ci} for ms, title, ci in chapters],
             "speakers": {sid: names.get(sid, sid) for sid in {w[3] for w in lines if w[3]}},
+            "colors": {c["id"]: PALETTE[i % len(PALETTE)] for i, c in enumerate(book["characters"])},
             # [start ms, chapter, segment (-1: the chapter's title), speaker id or null, text]
             "lines": [[ms, ci, si, who, book["chapters"][ci]["segments"][si]["text"] if si >= 0 else book["chapters"][ci]["title"]]
                       for ms, ci, si, who in lines],

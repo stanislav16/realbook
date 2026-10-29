@@ -73,6 +73,7 @@ struct Timeline: Codable {
     var author: String
     var chapters: [Chapter]
     var speakers: [String: String]
+    var colors: [String: String]?  // speaker id -> "#rrggbb", as on the Mac
     var lines: [Line]
 
     /// The line being read at `ms` (the last one that started by then).
@@ -115,4 +116,41 @@ struct LocalBook: Codable, Identifiable {
     var positionMs: Int = 0
     var positionUpdated: Double = 0  // when the reader was last at positionMs (Unix time)
     var durationMs: Int = 0
+}
+
+/// A book's details on the Mac (GET /api/books/{id}), for listening live.
+struct MacBook: Codable {
+    struct Member: Codable { var id: String; var name: String }
+    struct Entry: Codable { var title: String; var segments: Int }
+
+    var id: String
+    var title: String
+    var author: String
+    var cover: String?
+    var position: MacPosition
+    var cast: [Member]
+    var toc: [Entry]
+
+    /// The speakers' colours: their place in the cast picks one, the same way the Mac does.
+    var colors: [String: String] {
+        Dictionary(uniqueKeysWithValues: cast.enumerated().map { ($1.id, speakerPalette[$0 % speakerPalette.count]) })
+    }
+}
+
+/// The same colours as PALETTE in the Mac app.
+let speakerPalette = ["#d9480f", "#1c7ed6", "#2b8a3e", "#9c36b5", "#d6336c", "#0c8599", "#a0620a", "#5f3dc4",
+                      "#5c940d", "#e03131", "#087f5b", "#7048e8"]
+
+/// One chapter's text on the Mac (GET /api/books/{id}/chapters/{n}).
+struct MacChapter: Codable {
+    struct Segment: Codable {
+        var id: Int
+        var kind: String
+        var text: String
+        var para: Int
+        var speaker: String?
+    }
+
+    var title: String
+    var segments: [Segment]
 }

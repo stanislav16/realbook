@@ -659,7 +659,7 @@ def segment_audio(book_id: str, n: int, sid: int, prefetch: int = 0):
     seg = ch["segments"][sid]
     v = store.voice_for(b, seg)
     style = heuristic.line_styles(ch["segments"]).get(seg["q"], "") if seg["kind"] == "dialogue" and seg.get("speaker") else ""
-    path = tts.synthesize(store.audio_dir(book_id), store.spoken(b, seg["text"]), v["voice"], v["rate"], v["pitch_shift"],
+    path = tts.synthesize(store.audio_dir(book_id), store.spoken(b, heuristic.as_said(ch["segments"], seg)), v["voice"], v["rate"], v["pitch_shift"],
                           urgent=not prefetch, style=style)
     return FileResponse(path, media_type=system.AUDIO_TYPE, headers={"Cache-Control": "no-cache"})
 

@@ -138,7 +138,7 @@ def _run(book_id: str) -> None:
                 nxt = segs[i + 1] if i + 1 < len(segs) else None
                 pause = GAP_CHAPTER if nxt is None else GAP_PARAGRAPH if nxt["para"] != seg["para"] else GAP_LINE
                 style = styles.get(seg["q"], "") if seg["kind"] == "dialogue" and seg.get("speaker") else ""
-                items.append((ci, seg["text"], store.voice_for(book, seg), pause, style))
+                items.append((ci, heuristic.as_said(segs, seg), store.voice_for(book, seg), pause, style))
         job.update(total=len(items), message="Making the audio…")
 
         caf = _Caf(work)

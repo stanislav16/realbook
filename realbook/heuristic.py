@@ -716,3 +716,19 @@ def line_styles(segments: list[dict]) -> dict[int, str]:
             continue
         styles.setdefault(seg["q"], style)
     return styles
+
+
+def as_said(segments: list[dict], seg: dict) -> str:
+    """A line's text as its voice should read it. A quote cut off by its speech tag ends in a comma
+    (“That’s the one,” Paul said.), which voices can read as unfinished, rising like a question; it's
+    read with a full stop, unless the sentence goes on after the tag (“If you,” he said, “come here.”)."""
+    text = seg["text"]
+    if seg["kind"] != "dialogue" or not seg.get("speaker") or not text.rstrip().endswith(","):
+        return text
+    later = [s for s in segments if s["id"] > seg["id"] and s["kind"] == "dialogue"]
+    if later and later[0]["q"] == seg["q"]:
+        return text  # not the end of this quote
+    goes_on = next((s for s in later if s["para"] == seg["para"]), None)
+    if goes_on and goes_on["text"][:1].islower():
+        return text
+    return text.rstrip()[:-1] + "."

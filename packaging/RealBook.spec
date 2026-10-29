@@ -6,7 +6,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).parent
-VERSION = "0.9.21"
+VERSION = "0.9.22"
 MAC = sys.platform == "darwin"
 
 datas = [

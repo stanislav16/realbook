@@ -95,35 +95,75 @@ def _speakable(s: str) -> bool:
     return any(ch.isalnum() for ch in s)
 
 
+# A quote left open at the end of a paragraph usually goes on in the next one, which opens with
+# another “. A poem or song is often printed as one quote over many lines instead: “ on the first
+# line, ” on the last, nothing between (Jessica's recital in Dune). When a ” comes within this many
+# paragraphs, before any “, the lines between belong to the quote.
+MAX_UNMARKED_LINES = 30
+
+
+def _first_mark(p: str, style: str) -> str | None:
+    """"open" or "close": the paragraph's first quotation mark, if it has any."""
+    for i in range(len(p)):
+        if _is_open(p, i, style):
+            return "open"
+        if _is_close(p, i, style):
+            return "close"
+    return None
+
+
+def _unmarked_until(paragraphs: list[str], i: int, style: str) -> int | None:
+    """The paragraph whose ” closes a quote left open in paragraph `i`, when every one between has no marks."""
+    if style != "double":  # with ‘…’, apostrophes look like closing marks
+        return None
+    for j in range(i + 1, min(i + 1 + MAX_UNMARKED_LINES, len(paragraphs))):
+        mark = _first_mark(paragraphs[j], style)
+        if mark:
+            return j if mark == "close" else None
+    return None
+
+
 def segment_chapter(text: str, style: str) -> list[dict]:
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     if len(paragraphs) == 1 and "\n" in paragraphs[0]:
         # Some text files use single newlines between paragraphs.
         paragraphs = [p.strip() for p in paragraphs[0].split("\n") if p.strip()]
+    paragraphs = [" ".join(raw.split()) for raw in paragraphs]
 
     segments: list[dict] = []
     q = 0
     prev_open = False
-    for para_idx, raw in enumerate(paragraphs):
-        p = " ".join(raw.split())
+    carry_q, carry_until = None, -1  # a quote going on through unmarked lines, and where it closes
+    for para_idx, p in enumerate(paragraphs):
+        # (kind, text, cont, quote id when it continues an earlier one)
+        pieces: list[tuple[str, str, bool, int | None]] = []
+        if carry_q is not None and para_idx < carry_until:
+            pieces.append(("dialogue", p, True, carry_q))
+            p = ""
+        elif carry_q is not None:
+            close = next(i for i in range(len(p)) if _is_close(p, i, style))
+            pieces.append(("dialogue", p[:close], True, carry_q))
+            p = p[close + 1:]
+            prev_open, carry_q = False, None
         spans, left_open = quote_spans(p, style)
         cursor = 0
         first_quote = True
-        pieces: list[tuple[str, str, bool]] = []
         for start, end in spans:
-            pieces.append(("narration", p[cursor:start], False))
+            pieces.append(("narration", p[cursor:start], False, None))
             inner = p[start + 1 : end - 1] if end - start >= 2 and _ends_quote(p, end - 1, style) else p[start + 1 : end]
-            pieces.append(("dialogue", inner, prev_open and first_quote))
+            pieces.append(("dialogue", inner, prev_open and first_quote, None))
             first_quote = False
             cursor = end
-        pieces.append(("narration", p[cursor:], False))
+        pieces.append(("narration", p[cursor:], False, None))
 
-        for kind, chunk_text, cont in pieces:
+        for kind, chunk_text, cont, same_q in pieces:
             chunk_text = chunk_text.strip()
             if not _speakable(chunk_text):
                 continue
             quote_id = None
-            if kind == "dialogue":
+            if same_q is not None:
+                quote_id = same_q
+            elif kind == "dialogue":
                 quote_id = q
                 q += 1
             for piece in _chunks(chunk_text):
@@ -138,5 +178,10 @@ def segment_chapter(text: str, style: str) -> list[dict]:
                         "speaker": None,
                     }
                 )
-        prev_open = left_open
+        if carry_q is None and left_open and spans:
+            until = _unmarked_until(paragraphs, para_idx, style)
+            if until is not None:
+                carry_q, carry_until = q - 1, until
+        if carry_q is None:
+            prev_open = left_open
     return segments

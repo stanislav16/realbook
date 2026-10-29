@@ -49,10 +49,16 @@ _kokoro_gate = _Gate()
 # letter. Joined up ("Ohhh") it's said as one sound. Only single repeated letters count, so words
 # like "wide-eyed" stay as they are.
 STRETCHED = re.compile(r"(\w)((?:-\1(?=-|\b))+)", re.IGNORECASE)
+# Laughs: voices stumble over "Ah-h-h, hah!" and "Ho-ho-ho-o-o-o!"; in listening tests "Ha ha!" and
+# "Ho ho ho!" sounded like laughing.
+AH_HAH = re.compile(r"\b(a)h+(?:-h)*,?\s+hah\b", re.IGNORECASE)
+LAUGH_RUN = re.compile(r"\b(h[aeo]+h?(?:-h[aeo]+h?)+)(?:-[aeo])*\b", re.IGNORECASE)
 
 
 def _clean(text: str) -> str:
     text = text.replace("[[", "(").replace("]]", ")")  # never pass embedded commands through
+    text = AH_HAH.sub(lambda m: ("H" if m.group(1).isupper() else "h") + "a ha", text)
+    text = LAUGH_RUN.sub(lambda m: m.group(1).replace("-", " "), text)
     text = STRETCHED.sub(lambda m: m.group(1) + m.group(1).lower() * min(3, m.group(2).count("-")), text)
     text = re.sub(r"[_*#]+", " ", text)
     text = text.replace("—", ", ").replace("–", ", ")

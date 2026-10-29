@@ -1296,7 +1296,7 @@ wheels = [
 
 [[package]]
 name = "realbook"
-version = "0.9.23"
+version = "0.9.24"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },

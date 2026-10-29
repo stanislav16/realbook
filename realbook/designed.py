@@ -605,7 +605,8 @@ class Style:
     ending: str  # replaces the description's ", speaking …" part
     text: str  # what the sample says, in that mood
     attempts: int = 1
-    score: Callable | None = None  # (sample, usual sample) -> higher is better; tries stop once it's >= 0
+    # (sample, usual sample, likeness of the two by fingerprint) -> higher is better; tries stop once it's >= 0
+    score: Callable | None = None
     # Keep the usual sample's speaker fingerprint and take only the delivery from the styled one:
     # otherwise shouting or crying sounds like someone else (Qwen only).
     keep_voice: bool = False
@@ -614,23 +615,31 @@ class Style:
     # test heard Jessica whisper in her own voice.
     join: bool = False
     deep_ending: str = ""  # used instead of `ending` for voices described as deep
-    # Each line is checked against the usual voice: no more than MAX_PITCH_RISE higher, and the
-    # same speaker by fingerprint. A line that fails is made again, then read as usual.
+    # Each line is checked against the usual voice: no more than `max_rise` times higher, and the
+    # same speaker by fingerprint (at least `min_likeness`). A line that fails is made again; if no
+    # take passes, the closest is kept when it's at least `keep_likeness`, else it's read as usual.
     check_line: bool = False
+    max_rise: float = 1.7
+    min_likeness: float = 0.96
+    keep_likeness: float = 0.96
     version: int = 1  # bump when the style's sample changes, so samples and lines are made again
 
 
 STYLES = {
-    # About half of whisper designs come out spoken: a real whisper is mostly breath, at most half
-    # of it with a pitch (normal speech: ~75%).
-    "quiet": Style(", whispering quietly and secretively.", QUIET_REFERENCE_TEXT, attempts=4,
-                   score=lambda s, usual: 0.5 - _voiced(s), keep_voice=True, join=True),
+    # Whispered samples came out anywhere from half to 1.5 times the voice's pitch, so muttered lines
+    # sounded like someone else (the Reverend Mother 1.3-1.6 times higher). In listening tests a
+    # sample "grumbling under her breath" was the most like her: of several designs the one closest
+    # to the usual voice is kept, and each line must stay near the voice's pitch.
+    "quiet": Style(", grumbling quietly under {their} breath.", QUIET_REFERENCE_TEXT, attempts=6,
+                   score=lambda s, usual, likeness: min(likeness - 0.975, 0.15 - abs(np.log2(_pitch_rise(s, usual)))),
+                   keep_voice=True, join=True, check_line=True, max_rise=1.2, min_likeness=0.97,
+                   keep_likeness=0.955, version=2),  # Leto's muttering, a little deeper than him (0.96), was liked
     # Shouting samples came out two to three times higher than the voice (the Baron's 90 Hz voice
     # shouted at 300 Hz, like someone else): a sample must be at least 3 dB louder and at most
     # 1.8 times higher, and deep voices are asked to bellow instead.
     "loud": Style(", shouting loudly and forcefully.",
                   "Enough! I will not be kept waiting. Bring him to me, now! Do you hear me? Now!",
-                  attempts=4, score=lambda s, usual: min(_loudness(s) - _loudness(usual) - 3, 10 * (1.8 - _pitch_rise(s, usual))),
+                  attempts=4, score=lambda s, usual, likeness: min(_loudness(s) - _loudness(usual) - 3, 10 * (1.8 - _pitch_rise(s, usual))),
                   keep_voice=True, deep_ending=", bellowing angrily in a deep, booming voice.", check_line=True, version=2),
     "upset": Style(", speaking in a shaky, tearful, upset voice.",
                    "Please, please don't go. I can't do this without you. I'm so sorry, I never meant for any of this to happen.",
@@ -643,7 +652,8 @@ def style_description(description: str, style: str) -> str:
     """The same voice in another mood: "An adult woman with a clear, poised voice, whispering quietly and secretively." """
     first = description.split(". ")[0].split(", speaking")[0].rstrip(". ")
     how = STYLES[style]
-    return first + (how.deep_ending if how.deep_ending and re.search(r"\bdeep\b", first) else how.ending)
+    their = "her" if re.search(r"\b(woman|girl)\b", first) else "his" if re.search(r"\b(man|boy)\b", first) else "their"
+    return first + (how.deep_ending if how.deep_ending and re.search(r"\bdeep\b", first) else how.ending).format(their=their)
 
 
 def style_tag(style: str) -> str:
@@ -654,10 +664,6 @@ def style_tag(style: str) -> str:
 
 def _style_path(engine: Engine, key: str, style: str) -> Path:
     return voices_dir(engine) / f"{key}-{style_tag(style)}.wav"
-
-
-MAX_PITCH_RISE = 1.7
-MIN_LIKENESS = 0.96
 
 
 def _median_pitch(samples: np.ndarray) -> float:
@@ -701,7 +707,7 @@ def _design_style(engine: Engine, key: str, style: str) -> Path:
         best, best_score = None, -1e9
         for _ in range(how.attempts):
             samples = _generate(engine.design(_model(engine, engine.design_role), description, how.text))
-            score = how.score(samples, usual) if how.score else 0.0
+            score = how.score(samples, usual, _likeness(engine, samples, usual) if engine.fingerprint else 1.0) if how.score else 0.0
             if score > best_score:
                 best, best_score = samples, score
             if score >= 0:
@@ -710,6 +716,15 @@ def _design_style(engine: Engine, key: str, style: str) -> Path:
         _write_wav(tmp, best)
         tmp.rename(ref)
     return ref
+
+
+def _likeness(engine: Engine, a: np.ndarray, b: np.ndarray) -> float:
+    """How alike two clips' speakers are, by the reading model's speaker fingerprint (1 = the same)."""
+    import mlx.core as mx
+
+    model = _model(engine, engine.read_role)
+    x, y = (np.array(model.extract_speaker_embedding(mx.array(c))).ravel() for c in (a, b))
+    return float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y) + 1e-9))
 
 
 def _speak(engine: Engine, out: Path, text: str, key: str, style: str = "") -> None:
@@ -750,36 +765,37 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
             model.extract_speaker_embedding = fingerprint
 
     samples = generate()
+    acceptable = lambda s: True
     if styled and STYLES[style].check_line:
-        # A shouted or upset line can still come out as someone else (higher, another accent): it's
-        # made again, and if it still isn't them, read in the usual voice.
-        import mlx.core as mx
-
+        # A styled line can still come out as someone else (higher, another accent): it's made
+        # again, and if it still isn't them, read in the usual voice.
         usual_samples = _read_wav(usual)
-        print_of = lambda s: np.array(model.extract_speaker_embedding(mx.array(s))).ravel()
-        mine = print_of(usual_samples)
+        how = STYLES[style]
 
-        def same_person(s: np.ndarray) -> bool:
-            other = print_of(s)
-            likeness = float(other @ mine / (np.linalg.norm(other) * np.linalg.norm(mine) + 1e-9))
-            return _pitch_rise(s, usual_samples) <= MAX_PITCH_RISE and likeness >= MIN_LIKENESS
+        def likeness(s: np.ndarray) -> float:  # 0 if it's too high to be them
+            return 0.0 if _pitch_rise(s, usual_samples) > how.max_rise else _likeness(engine, s, usual_samples)
 
+        best = likeness(samples)
         for _ in range(STYLE_RETRIES):
-            if same_person(samples):
+            if best >= how.min_likeness:
                 break
+            again = generate()
+            if (alike := likeness(again)) > best:
+                samples, best = again, alike
+        if best < how.keep_likeness:
+            styled, ref, ref_text = False, usual, usual_text
             samples = generate()
         else:
-            if not same_person(samples):
-                styled, ref, ref_text = False, usual, usual_text
-                samples = generate()
+            acceptable = lambda s: likeness(s) >= min(best, how.min_likeness)
 
     # About one line in six stops while its last sound is still going (the model ends a frame too
-    # soon), which sounds clipped. Those are made again, up to twice, keeping the cleanest ending.
+    # soon), which sounds clipped. Those are made again, up to twice, keeping the cleanest ending
+    # (of the takes that are still the same person).
     for _ in range(CUT_RETRIES):
         if _ending(samples) <= CUT_DB:
             break
         again = generate()
-        if _ending(again) < _ending(samples):
+        if _ending(again) < _ending(samples) and acceptable(again):
             samples = again
     if style == "quiet" and style in engine.styles:
         over = _loudness(samples) - (_loudness(_read_wav(usual)) - QUIET_DB)

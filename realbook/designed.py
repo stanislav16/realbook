@@ -789,13 +789,20 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
             acceptable = lambda s: likeness(s) >= min(best, how.min_likeness)
 
     # About one line in six stops while its last sound is still going (the model ends a frame too
-    # soon), which sounds clipped. Those are made again, up to twice, keeping the cleanest ending
-    # (of the takes that are still the same person).
+    # soon), which sounds clipped, and about one statement in a hundred ends rising like a question.
+    # Those are made again, up to twice, keeping the best ending (of the takes that are still the
+    # same person).
+    statement = re.search(r"[.!][\"”’')\]]*\s*$", text) is not None
+
+    def faults(s: np.ndarray) -> tuple[int, float]:  # sounding like a question is worse than a clipped end
+        clipped, rising = _ending(s) > CUT_DB, statement and _end_rise(s) > MAX_STATEMENT_RISE
+        return int(clipped) + 2 * int(rising), _ending(s)
+
     for _ in range(CUT_RETRIES):
-        if _ending(samples) <= CUT_DB:
+        if not faults(samples)[0]:
             break
         again = generate()
-        if _ending(again) < _ending(samples) and acceptable(again):
+        if faults(again) < faults(samples) and acceptable(again):
             samples = again
     if style == "quiet" and style in engine.styles:
         over = _loudness(samples) - (_loudness(_read_wav(usual)) - QUIET_DB)
@@ -814,6 +821,10 @@ CUT_RETRIES = 2
 # clip's silent end) 18%.
 CUT_DB = -28
 SPEECH_DB = -40
+# A statement's last 200 ms of speech this much higher than the 600 ms before sounds like a question
+# ("…with a slip-tip." climbed to 1.7 times). Of Dune's saved statements 1% went above it; questions
+# themselves never went past 1.5.
+MAX_STATEMENT_RISE = 1.4
 FADE_IN_MS, FADE_OUT_MS, TAIL_MS = 5, 40, 40
 
 
@@ -829,6 +840,29 @@ def _ending(samples: np.ndarray) -> float:
     db = 20 * np.log10(rms / rms.max())
     speech = np.where(db > SPEECH_DB)[0]
     return float(db[speech[-1]]) if len(speech) else -100.0
+
+
+def _end_rise(samples: np.ndarray) -> float:
+    """The pitch of a line's last 200 ms of voice over that of the 600 ms before (1 = level). A jump to
+    double or half between neighbouring frames is the pitch finder slipping an octave, and is folded back."""
+    hop = SAMPLE_RATE // 50
+    times, pitches = [], []
+    for i in range(0, len(samples) - 2048, hop):
+        p = _pitch(samples[i:i + 2048])
+        if p <= 0:
+            continue
+        if pitches:
+            while p / pitches[-1] > 1.8:
+                p /= 2
+            while p / pitches[-1] < 0.55:
+                p *= 2
+        times.append(i // hop)
+        pitches.append(p)
+    if len(pitches) < 10:
+        return 1.0
+    t, p = np.array(times), np.array(pitches)
+    last, before = p[t > t[-1] - 10], p[(t <= t[-1] - 10) & (t > t[-1] - 40)]
+    return float(np.median(last) / np.median(before)) if len(before) >= 5 else 1.0
 
 
 def _tidy_ends(samples: np.ndarray) -> np.ndarray:

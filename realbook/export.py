@@ -7,6 +7,7 @@ The result plays offline in any audiobook app: Apple Books, BookPlayer, Smart Au
 
 from __future__ import annotations
 
+import json
 import re
 import struct
 import subprocess
@@ -35,12 +36,19 @@ def output(book: dict) -> Path:
     return store.book_dir(book["id"]) / "export" / f"{name}.m4b"
 
 
+def timeline_path(book: dict) -> Path:
+    """Where each line of the export starts, for the iPhone app to show the text and keep the
+    reading position in step with the Mac."""
+    return store.book_dir(book["id"]) / "export" / "timeline.json"
+
+
 def status(book_id: str) -> dict:
     book = store.load(book_id)
     job = dict(_jobs.get(book_id, {"state": "idle"}))
     path = output(book)
     if path.exists() and job["state"] != "running":
-        job.update(file=path.name, bytes=path.stat().st_size, made=path.stat().st_mtime)
+        job.update(file=path.name, bytes=path.stat().st_size, made=path.stat().st_mtime,
+                   phone=timeline_path(book).exists())
     return job
 
 
@@ -128,10 +136,12 @@ def _run(book_id: str) -> None:
 
     try:
         items = []  # (chapter index, text, voice settings, pause after, style)
+        where = []  # (segment index or -1 for a heading, speaker id) for each item
         for ci, ch in enumerate(book["chapters"]):
             heading = _spoken_title(ch["title"])
             if heading:
                 items.append((ci, heading, narrator, GAP_TITLE, ""))
+                where.append((-1, None))
             segs = ch["segments"]
             styles = heuristic.line_styles(segs)
             for i, seg in enumerate(segs):
@@ -139,16 +149,19 @@ def _run(book_id: str) -> None:
                 pause = GAP_CHAPTER if nxt is None else GAP_PARAGRAPH if nxt["para"] != seg["para"] else GAP_LINE
                 style = styles.get(seg["q"], "") if seg["kind"] == "dialogue" and seg.get("speaker") else ""
                 items.append((ci, heuristic.as_said(segs, seg), store.voice_for(book, seg), pause, style))
+                where.append((i, seg.get("speaker") if seg["kind"] == "dialogue" else None))
         job.update(total=len(items), message="Making the audio…")
 
         caf = _Caf(work)
         chapters: list[tuple[int, str]] = []
+        lines = []  # [start ms, chapter, segment, speaker id]
         try:
             with ThreadPoolExecutor(4) as pool:  # lines are made in order; decoding overlaps
                 results = pool.map(lambda it: render(it[1], it[2], it[4]), items)
                 for n, ((ci, _, _, pause, _), pcm) in enumerate(zip(items, results), 1):
                     if not chapters or chapters[-1][2] != ci:
                         chapters.append((caf.ms, book["chapters"][ci]["title"] or f"Chapter {ci + 1}", ci))
+                    lines.append([caf.ms, ci, *where[n - 1]])
                     caf.add(pcm)
                     caf.silence(pause)
                     rate = n / max(1e-6, time.monotonic() - started)
@@ -168,6 +181,16 @@ def _run(book_id: str) -> None:
             if old != encoded:
                 old.unlink()
         encoded.rename(target)
+        names = {c["id"]: c["name"] for c in book["characters"]}
+        timeline = {
+            "version": 1, "made": time.time(), "ms": caf.ms, "title": book["title"], "author": book["author"],
+            "chapters": [{"ms": ms, "title": title, "chapter": ci} for ms, title, ci in chapters],
+            "speakers": {sid: names.get(sid, sid) for sid in {w[3] for w in lines if w[3]}},
+            # [start ms, chapter, segment (-1: the chapter's title), speaker id or null, text]
+            "lines": [[ms, ci, si, who, book["chapters"][ci]["segments"][si]["text"] if si >= 0 else book["chapters"][ci]["title"]]
+                      for ms, ci, si, who in lines],
+        }
+        timeline_path(book).write_text(json.dumps(timeline, ensure_ascii=False, separators=(",", ":")))
         job.update(state="done", message=f"Audiobook ready: {_duration(caf.frames / RATE)} long")
     except Cancelled:
         job.update(state="idle", message="Export cancelled")

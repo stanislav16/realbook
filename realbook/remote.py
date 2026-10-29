@@ -12,11 +12,13 @@ import secrets
 import socket
 import threading
 import time
+import urllib.parse
 
 from . import store, system
 
 PORT = 47321
 COOKIE = "realbook_key"
+HEADER = "x-realbook-key"  # how the iPhone app sends the key
 # Things only someone sitting at the Mac may do.
 BLOCKED = [("PUT", "/api/settings"), ("POST", "/api/open-link"), ("POST", "/api/open-voice-settings"),
            ("POST", "/api/kokoro/install"), ("POST", "/api/qwen/install"), ("POST", "/api/breeze/install"), ("POST", "/api/remote"),
@@ -48,6 +50,12 @@ def lan_address() -> str | None:
             return None
 
 
+def mac_name() -> str:
+    """This Mac's name on the local network ("Stanislavs-MacBook-Pro.local")."""
+    name = socket.gethostname()
+    return name if name.endswith(".local") else f"{name.split('.')[0]}.local"
+
+
 def is_local(client_host: str | None) -> bool:
     return client_host in ("127.0.0.1", "::1", "localhost")
 
@@ -63,7 +71,8 @@ def blocked(method: str, path: str) -> bool:
 def status() -> dict:
     on = enabled() and _server is not None
     ip = lan_address()
-    url = f"http://{ip}:{PORT}/?key={token()}" if ip else None
+    # The Mac's own name too, so the iPhone app still finds it when its address changes.
+    url = f"http://{ip}:{PORT}/?key={token()}&mac={urllib.parse.quote(mac_name())}" if ip else None
     return {"enabled": enabled(), "running": on, "url": url if on else None, "qr": _qr(url) if on and url else None,
             "address": f"{ip}:{PORT}" if ip else None}
 

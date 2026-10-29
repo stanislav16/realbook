@@ -160,7 +160,7 @@ const colorOf = (id) => {
 
 /* ------------------------------------------------------------------ library */
 
-const FILTER_TITLES = { reading: "Reading Now", all: "All Books", finished: "Finished" };
+const FILTER_TITLES = { reading: "Reading Now", all: "All Books", finished: "Finished", phone: "Listen on iPhone" };
 
 async function showLibrary() {
   stop();
@@ -177,6 +177,9 @@ async function showLibrary() {
 function renderLibrary() {
   $$(".nav-item[data-filter]").forEach((b) => b.classList.toggle("current", b.dataset.filter === S.filter));
   $("#lib-title").textContent = FILTER_TITLES[S.filter];
+  $("#library").classList.toggle("phone-view", S.filter === "phone");
+  clearTimeout(S.phoneTimer);
+  if (S.filter === "phone") return renderPhone();
   const q = $("#search").value.trim().toLowerCase();
   let books = S.books.filter((b) => !q || `${b.title} ${b.author}`.toLowerCase().includes(q));
   if (S.filter === "reading") books = books.filter((b) => b.progress > 0 && !b.finished).sort((a, b) => b.opened - a.opened);
@@ -189,6 +192,68 @@ function renderLibrary() {
       : S.filter === "finished" ? "Books you finish will appear here."
       : "No books yet. Click Add Book, or drop an EPUB or text file here."));
   }
+}
+
+/* ------------------------------------------------------------- iPhone tab */
+
+const size = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : Math.round(n / 1e6) + " MB");
+
+// Turning iPhone access on and off, the pairing code, and each book's offline copy (its export).
+async function renderPhone() {
+  const grid = $("#books");
+  let r, books;
+  try {
+    [r, books] = await Promise.all([api("/api/remote"), api("/api/phone/books")]);
+  } catch (e) {
+    return grid.replaceChildren(el("div", { class: "empty" }, e.message));
+  }
+  if (S.filter !== "phone") return;
+  const refresh = () => { if (S.filter === "phone" && !$("#library").classList.contains("hidden")) renderPhone(); };
+  const toggle = (on) => async () => {
+    try { await api("/api/remote", { method: "POST", json: { enabled: on } }); refresh(); } catch (e) { toast(e.message); }
+  };
+
+  const pairing = el("section", { class: "phone-card" }, el("h4", {}, "Pair your iPhone"));
+  if (r.running && r.url) {
+    const qr = el("div", { class: "remote-qr" });
+    qr.innerHTML = r.qr;  // SVG made by RealBook's own server
+    pairing.append(el("div", { class: "phone-pair" }, qr, el("div", {},
+      el("p", {}, "In the RealBook app on your iPhone, tap Pair and scan this code."),
+      el("p", { class: "muted small" }, "Or scan it with the Camera to listen in Safari, live from this Mac. Anyone with this code on your network can listen to your books."),
+      el("div", { class: "design-actions" },
+        el("button", { class: "button small", type: "button", onclick: toggle(false) }, "Turn Off"),
+        el("button", { class: "button small", type: "button", title: "Devices paired with the old code stop working", onclick: async () => { await api("/api/remote/reset", { method: "POST" }); refresh(); } }, "New Code")))));
+  } else if (r.running) {
+    pairing.append(el("p", { class: "muted small" }, "This Mac isn't connected to a network."), el("button", { class: "button small", type: "button", onclick: toggle(false) }, "Turn Off"));
+  } else {
+    pairing.append(el("p", { class: "muted small" }, "Let your iPhone reach RealBook over your Wi‑Fi, to download books and keep your place in step with this Mac."),
+      el("button", { class: "button primary", type: "button", onclick: toggle(true) }, "Turn On"));
+  }
+
+  const running = books.some((b) => b.export.state === "running");
+  const rows = books.map((b) => {
+    const x = b.export;
+    const start = async () => { try { await api(`/api/books/${b.id}/export`, { method: "POST" }); refresh(); } catch (e) { toast(e.message); } };
+    let state, action = null;
+    if (x.state === "running") {
+      const pct = x.total ? Math.round((100 * x.done) / x.total) : 0;
+      state = el("div", { class: "phone-progress" }, el("div", { class: "export-bar" }, el("div", { style: `width:${pct}%` })), el("span", { class: "muted small" }, x.message));
+      action = el("button", { class: "button small", type: "button", onclick: async () => { await api(`/api/books/${b.id}/export/cancel`, { method: "POST" }); refresh(); } }, "Cancel");
+    } else if (x.file && x.phone) {
+      state = el("span", { class: "muted small" }, `Ready to download · ${size(x.bytes)} · made ${new Date(x.made * 1000).toLocaleDateString()}`);
+      action = el("button", { class: "button small", type: "button", title: "Make it again, with the current voices", onclick: start }, "Update");
+    } else {
+      state = el("span", { class: "muted small" }, x.state === "error" ? x.message : x.file ? "Made before the iPhone app; make it again to download it" : "Not made yet");
+      action = el("button", { class: "button small primary", type: "button", onclick: start }, "Make Offline Copy");
+    }
+    return el("div", { class: "phone-row" }, el("div", { class: "phone-cover" }, coverEl(b)),
+      el("div", { class: "phone-info" }, el("div", { class: "phone-title" }, b.title), state), action);
+  });
+  const copies = el("section", { class: "phone-card" }, el("h4", {}, "Offline copies"),
+    el("p", { class: "muted small" }, "The iPhone app plays a book offline from its offline copy: the whole book made into audio once, with the current voices. Making one takes as long as the voices need for lines you haven't listened to yet, so a long book can take hours; this Mac needs to stay on meanwhile."),
+    ...rows);
+  grid.replaceChildren(el("div", { class: "phone-page" }, pairing, copies));
+  if (running) S.phoneTimer = setTimeout(refresh, 2000);
 }
 
 function hash(s) { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h); }
@@ -585,9 +650,27 @@ function step(delta) {
   if (was) play(); else { setPlayingUI(); savePosition(); }
 }
 
+// Coming back to this window after listening on the iPhone: carry on from where the phone got to.
+async function catchUpPosition() {
+  if (!S.book || S.playing || document.hidden) return;
+  const id = S.book.id;
+  let book;
+  try { book = await api(`/api/books/${id}`); } catch { return; }
+  const p = book.position || {};
+  if (S.book?.id !== id || S.playing || (p.updated || 0) <= (S.positionSaved || 0)) return;
+  if (p.chapter !== S.chapterIdx || p.segment !== S.segIdx) {
+    S.positionSaved = p.updated;
+    await loadChapter(p.chapter, p.segment);
+    toast("Continuing from where you got to on your iPhone");
+  }
+}
+document.addEventListener("visibilitychange", catchUpPosition);
+window.addEventListener("focus", catchUpPosition);
+
 function savePosition() {
   clearTimeout(S.saveTimer);
   const id = S.book.id, pos = { chapter: S.chapterIdx, segment: S.segIdx };
+  S.positionSaved = Date.now() / 1000;
   S.saveTimer = setTimeout(() => api(`/api/books/${id}/position`, { method: "PUT", json: pos }).catch(() => {}), 1200);
 }
 
@@ -1050,31 +1133,6 @@ async function openSettings() {
     el("button", { class: "button small", type: "button", onclick: () => api("/api/open-voice-settings", { method: "POST" }).catch((e) => toast(e.message)) },
       c.platform === "mac" ? "Open VoiceOver Utility" : "Open Speech Settings"));
 
-  const remoteSection = el("section", { class: "settings-section" }, el("h4", {}, "Listen on Other Devices"));
-  const remoteBox = el("div");
-  const showRemote = (r) => {
-    const toggle = (on) => async () => {
-      try { showRemote(await api("/api/remote", { method: "POST", json: { enabled: on } })); } catch (e) { toast(e.message); }
-    };
-    const parts = [el("p", { class: "muted small" }, "Read and listen on your phone, tablet or another computer on the same Wi‑Fi. This computer makes the voices, so it needs to be on; it stays awake while something is playing.")];
-    if (r.running && r.url) {
-      const qr = el("div", { class: "remote-qr" });
-      qr.innerHTML = r.qr;  // SVG made by RealBook's own server
-      parts.push(qr,
-        el("p", { class: "small" }, "Scan with your phone's camera, or open this address: ", el("code", { class: "remote-url" }, r.url)),
-        el("p", { class: "muted small" }, "Anyone with this link on your network can listen to your books. On iPhone, use Share → Add to Home Screen for an app icon."),
-        el("div", { class: "design-actions" },
-          el("button", { class: "button small", type: "button", onclick: toggle(false) }, "Turn Off"),
-          el("button", { class: "button small", type: "button", title: "Devices paired with the old link stop working", onclick: async () => showRemote(await api("/api/remote/reset", { method: "POST" })) }, "New Link")));
-    } else if (r.running) {
-      parts.push(el("p", { class: "muted small" }, "This computer isn't connected to a network."), el("button", { class: "button small", type: "button", onclick: toggle(false) }, "Turn Off"));
-    } else {
-      parts.push(el("button", { class: "button small", type: "button", onclick: toggle(true) }, "Turn On"));
-    }
-    remoteBox.replaceChildren(...parts);
-  };
-  remoteSection.append(remoteBox);
-  api("/api/remote").then(showRemote).catch(() => remoteSection.remove());
 
   const claudeSection = el("section", { class: "settings-section" }, el("h4", {}, "Claude (optional)"));
   if (c.key_source === "env") {
@@ -1093,7 +1151,7 @@ async function openSettings() {
   }
 
   const form = el("form", {},
-    el("h3", {}, "Settings"), voiceSection, remoteSection, claudeSection,
+    el("h3", {}, "Settings"), voiceSection, claudeSection,
     el("div", { class: "dialog-actions" },
       el("button", { class: "button", type: "button", "data-cancel": true }, "Cancel"),
       el("button", { class: "button primary", type: "submit" }, "Save")));
@@ -1119,7 +1177,6 @@ async function openSettings() {
 function exportBook(b) {
   closePopovers();
   const body = el("div");
-  const size = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : Math.round(n / 1e6) + " MB");
   let timer;
   const show = (st) => {
     const parts = [];

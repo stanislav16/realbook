@@ -9,3 +9,5 @@ voice-test/
 .DS_Store
 .claude/
 *.m4b
+xcuserdata/
+*.xcodeproj/project.xcworkspace/

@@ -332,3 +332,19 @@ dialog:has(.review-paste), dialog:has(.review-steps) { width: min(560px, calc(10
 .menu-search { margin: 0 0 4px; height: 24px; }
 .menu button[hidden], .menu hr[hidden] { display: none; }
 .cast-none { padding: 4px 6px; }
+
+/* iPhone tab */
+.phone-view #search, .phone-view #add-book, .phone-view #drop { display: none; }
+.phone-view .grid { display: block; }
+.phone-page { max-width: 640px; display: flex; flex-direction: column; gap: 22px; }
+.phone-card h4 { margin: 0 0 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--secondary); }
+.phone-card p { margin: 0 0 8px; line-height: 1.45; }
+.phone-pair { display: flex; gap: 18px; align-items: flex-start; }
+.phone-pair .remote-qr { flex: none; margin: 0; }
+.phone-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: .5px solid var(--separator); }
+.phone-cover { width: 34px; height: 50px; flex: none; border-radius: 3px; overflow: hidden; }
+.phone-cover img, .phone-cover .gen-cover { width: 100%; height: 100%; object-fit: cover; font-size: 0; }
+.phone-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.phone-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-progress .export-bar { margin: 4px 0 3px; max-width: 320px; }
+@media (max-width: 640px) { .phone-pair { flex-direction: column; } }

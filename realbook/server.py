@@ -33,6 +33,10 @@ async def guard_remote(request: Request, call_next):
     """Requests from other devices need the pairing key, and can't change things on the Mac."""
     if remote.is_local(request.client.host if request.client else None):
         return await call_next(request)
+    if remote.authorised(request.headers.get(remote.HEADER)):  # the iPhone app
+        if remote.blocked(request.method, request.url.path):
+            return JSONResponse({"detail": "Only possible on the Mac itself"}, status_code=403)
+        return await call_next(request)
     key = request.query_params.get("key")
     if key and remote.authorised(key):
         # Remember the key and drop it from the address bar.
@@ -246,16 +250,22 @@ def get_chapter(book_id: str, n: int):
 class Position(BaseModel):
     chapter: int
     segment: int
+    # When the reader was there (Unix time). The iPhone app sends when it listened, which may be
+    # before it could reach the Mac; an older position than the saved one is ignored.
+    updated: float | None = None
 
 
 @app.put("/api/books/{book_id}/position")
 def set_position(book_id: str, pos: Position):
     b = _book(book_id)
     with store.lock(book_id):
-        b["position"] = pos.model_dump()
-        b["opened"] = time.time()
+        when = pos.updated or time.time()
+        if when < b.get("position", {}).get("updated", 0):
+            return {"ok": False, "position": b["position"]}
+        b["position"] = {**pos.model_dump(), "updated": when}
+        b["opened"] = max(b.get("opened", 0), when)
         store.save(b)
-    return {"ok": True}
+    return {"ok": True, "position": b["position"]}
 
 
 @app.get("/api/books/{book_id}/cover")
@@ -623,6 +633,23 @@ def start_export(book_id: str):
 def cancel_export(book_id: str):
     _book(book_id)
     return export.cancel(book_id)
+
+
+@app.get("/api/books/{book_id}/export/timeline")
+def export_timeline(book_id: str):
+    path = export.timeline_path(_book(book_id))
+    if not path.exists():
+        raise HTTPException(404, "Export the audiobook first")
+    return FileResponse(path, media_type="application/json")
+
+
+# ------------------------------------------------------------------ iPhone app
+
+
+@app.get("/api/phone/books")
+def phone_books():
+    """Every book with its reading position and whether its offline copy (the export) is ready."""
+    return [{**s, "export": export.status(s["id"])} for s in store.list_books()]
 
 
 @app.get("/api/books/{book_id}/export/file")

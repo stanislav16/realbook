@@ -809,18 +809,26 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
 
 STYLE_RETRIES = 2
 CUT_RETRIES = 2
-CUT_DB = -30  # the last 20 ms louder than this (against the loudest 20 ms) means it stopped mid-sound
+# Speech ending louder than this (against the loudest 20 ms) stopped mid-sound: in the voices' own
+# recordings 4% of endings are this loud, in lines made with the old check (which looked at the
+# clip's silent end) 18%.
+CUT_DB = -28
+SPEECH_DB = -40
 FADE_IN_MS, FADE_OUT_MS, TAIL_MS = 5, 40, 40
 
 
 def _ending(samples: np.ndarray) -> float:
-    """How loud the last 20 ms are, in dB against the loudest 20 ms of the line."""
+    """How loud the last 20 ms of speech are, in dB against the loudest 20 ms of the line. The model
+    follows its last sound with a moment of silence, so this looks where the speech ends (the last
+    20 ms above SPEECH_DB), not at the end of the clip."""
     frame = SAMPLE_RATE // 50
     n = len(samples) // frame
     if n < 2:
         return -100.0
     rms = np.sqrt(np.mean(samples[:n * frame].reshape(n, frame) ** 2, axis=1)) + 1e-9
-    return float(20 * np.log10(rms[-1] / rms.max()))
+    db = 20 * np.log10(rms / rms.max())
+    speech = np.where(db > SPEECH_DB)[0]
+    return float(db[speech[-1]]) if len(speech) else -100.0
 
 
 def _tidy_ends(samples: np.ndarray) -> np.ndarray:

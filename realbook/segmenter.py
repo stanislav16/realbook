@@ -41,6 +41,12 @@ def _is_close(p: str, j: int, style: str) -> bool:
     return not nxt.isalpha()
 
 
+def _ends_quote(p: str, j: int, style: str) -> bool:
+    # A “ inside a “…” quote is a closing mark printed the wrong way round ("‘namely?’ “asked the
+    # bird"): double quotes don't nest, so the quote ends there instead of swallowing the narration.
+    return _is_close(p, j, style) or (style == "double" and p[j] == "“")
+
+
 def quote_spans(p: str, style: str) -> tuple[list[tuple[int, int]], bool]:
     """Return [(start, end)] spans including the marks, and whether the last quote was left open."""
     spans: list[tuple[int, int]] = []
@@ -49,7 +55,7 @@ def quote_spans(p: str, style: str) -> tuple[list[tuple[int, int]], bool]:
     while i < n:
         if _is_open(p, i, style):
             j = i + 1
-            while j < n and not _is_close(p, j, style):
+            while j < n and not _ends_quote(p, j, style):
                 j += 1
             if j >= n:
                 left_open = True
@@ -106,7 +112,7 @@ def segment_chapter(text: str, style: str) -> list[dict]:
         pieces: list[tuple[str, str, bool]] = []
         for start, end in spans:
             pieces.append(("narration", p[cursor:start], False))
-            inner = p[start + 1 : end - 1] if end - start >= 2 and _is_close(p, end - 1, style) else p[start + 1 : end]
+            inner = p[start + 1 : end - 1] if end - start >= 2 and _ends_quote(p, end - 1, style) else p[start + 1 : end]
             pieces.append(("dialogue", inner, prev_open and first_quote))
             first_quote = False
             cursor = end

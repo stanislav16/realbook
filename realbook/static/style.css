@@ -70,6 +70,7 @@ select:focus, input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accen
 .sidebar-top { height: 52px; flex: none; }
 .sidebar-nav { flex: 1; }
 .sidebar-label { font-size: 11px; font-weight: 600; color: var(--secondary); padding: 6px 8px 4px; }
+.sidebar-label:not(:first-child) { margin-top: 14px; }
 .nav-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; text-align: left; font-size: 13px; }
 .nav-item svg { width: 17px; height: 17px; color: var(--accent); }
 .nav-item:hover { background: var(--fill); }
@@ -342,9 +343,10 @@ dialog:has(.review-paste), dialog:has(.review-steps) { width: min(560px, calc(10
 .phone-pair { display: flex; gap: 18px; align-items: flex-start; }
 .phone-pair .remote-qr { flex: none; margin: 0; }
 .phone-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: .5px solid var(--separator); }
-.phone-cover { width: 34px; height: 50px; flex: none; border-radius: 3px; overflow: hidden; }
+.phone-cover { position: relative; width: 34px; height: 50px; flex: none; border-radius: 3px; overflow: hidden; }
 .phone-cover img, .phone-cover .gen-cover { width: 100%; height: 100%; object-fit: cover; font-size: 0; }
 .phone-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .phone-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phone-progress .export-bar { margin: 4px 0 3px; max-width: 320px; }
 @media (max-width: 640px) { .phone-pair { flex-direction: column; } }
+.phone-cover .gen-cover > * { display: none; }

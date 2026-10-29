@@ -123,6 +123,8 @@ def apply(book: dict, results: dict[str, dict]) -> int:
         c["summary"] = ", ".join(b for b in bits if b) + (f"; speaks {p['manner']}" if p["manner"] else "")
         c["profiled_by"] = "local-ai"
         changed += 1
+    if results.get(NARRATOR_KEY):
+        set_teller(book, results[NARRATOR_KEY], "local-ai")
     book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
     return changed
 
@@ -251,6 +253,102 @@ def parse(reply: str) -> dict | None:
     return out
 
 
+# ------------------------------------------------------------------ the narrator
+#
+# A book told by its author or by one of its characters ("I") gets a narrator of that person's
+# gender; one told by an unnamed storyteller keeps the default narrator. Who tells it is counted:
+# Fourth Wing's narration says "I" in half its sentences, The 48 Laws of Power says "you" to the
+# reader in a fifth, Dune says either in under 5% (epigraphs and thoughts). The model only
+# answers whether that teller is a man or a woman.
+
+NARRATOR_KEY = ":narrator"  # where profile_book puts the answer; character ids are never like this
+FIRST_PERSON = re.compile(r"\b(I|I'm|I’m|I've|I’ve|I'd|I’d|my|me|myself)\b")
+SECOND_PERSON = re.compile(r"\b(you|your|yourself)\b", re.I)
+TOLD_AS_I = 0.15  # share of narration sentences
+TOLD_TO_YOU = 0.08
+NOT_STORY = re.compile(r"contents|copyright|acknowledg|front matter|dedication|books by|also by|praise", re.I)
+OPENING_WORDS = 900
+I_SENTENCES = 12
+
+TELLER_PROMPT = """You are casting the narrator of an audiobook. {who}
+
+Title: {title}
+Author: {author}
+
+Opening:
+{opening}
+
+Narration that says "I":
+{sentences}
+
+{question} Answer "unknown" if you are not sure.
+
+Reply with JSON only, no other text:
+{{"gender": "male" | "female" | "unknown"}}"""
+
+WHO = {
+    "character": ("The book is told by one of its characters, as \"I\". Below are its opening and sentences where the narrator talks about themselves.",
+                  "Is this narrator a man or a woman? Use what the story says about them (their name, how others address them, pronouns used for them)."),
+    "author": ("The book is non-fiction: the author speaks to the reader in their own voice. Below are its opening and sentences where the author talks about themselves.",
+               "Is the author a man or a woman? Use what the book says, or what you know about this author."),
+}
+
+
+def _narration_sentences(chapter: dict) -> list[str]:
+    narration = " ".join(s["text"] for s in chapter["segments"] if s["kind"] == "narration")
+    return [s for s in re.split(r"(?<=[.!?…])\s+", narration) if len(s) > 3]
+
+
+def teller_of(book: dict) -> str:
+    """"character" (told as "I"), "author" (talks to "you"), or "storyteller"."""
+    sentences = [s for ch in book["chapters"] for s in _narration_sentences(ch)]
+    if not sentences:
+        return "storyteller"
+    if sum(1 for s in sentences if FIRST_PERSON.search(s)) / len(sentences) >= TOLD_AS_I:
+        return "character"
+    if sum(1 for s in sentences if SECOND_PERSON.search(s)) / len(sentences) >= TOLD_TO_YOU:
+        return "author"
+    return "storyteller"
+
+
+def teller_evidence(book: dict) -> tuple[str, list[str]]:
+    """(the opening of the first real chapter, first-person sentences of narration across the book)."""
+    story = [ch for ch in book["chapters"] if not NOT_STORY.search(ch.get("title", ""))] or book["chapters"]
+    first = next((ch for ch in story if sum(len(s["text"].split()) for s in ch["segments"]) >= 1000), story[0] if story else None)
+    words = " ".join(s["text"] for s in first["segments"]).split() if first else []
+    sentences = [s for ch in story for s in _narration_sentences(ch) if FIRST_PERSON.search(s) and 20 < len(s) < 300]
+    return " ".join(words[:OPENING_WORDS]), _spread(sentences, I_SENTENCES)
+
+
+def parse_gender(reply: str) -> str:
+    m = re.search(r"\{.*\}", reply, re.S)
+    try:
+        data = json.loads(m.group(0)) if m else {}
+    except json.JSONDecodeError:
+        data = {}
+    return data.get("gender") if isinstance(data, dict) and data.get("gender") in ("male", "female") else "unknown"
+
+
+def find_teller(book: dict, path: Path) -> dict:
+    teller = teller_of(book)
+    if teller == "storyteller":
+        return {"teller": teller, "gender": "unknown"}
+    opening, sentences = teller_evidence(book)
+    who, question = WHO[teller]
+    prompt = TELLER_PROMPT.format(who=who, question=question, title=book.get("title", ""),
+                                  author=book.get("author", "") or "unknown", opening=opening or "(none)",
+                                  sentences="\n".join(f"- {s}" for s in sentences) or "- (none)")
+    return {"teller": teller, "gender": parse_gender(designed._submit(designed.BACKGROUND, ask, path, prompt, 30).result())}
+
+
+def set_teller(book: dict, teller: dict, by: str) -> None:
+    """Record who tells the book; the narrator's voice follows unless the user picked one."""
+    n = book.setdefault("narrator", {})
+    if by == "local-ai" and n.get("profiled_by") == "review":  # a stronger AI's answer isn't overwritten
+        return
+    n.update(teller=teller["teller"], gender=teller["gender"], profiled_by=by)
+
+
 def _tidy(text, max_words: int) -> str:
     """Words safe to put in a voice description: no darkening words, no accent, no "voice".
 
@@ -318,6 +416,9 @@ def profile_book(book: dict, path: Path, progress: Callable[[str], None] = lambd
             profile["other_names"] = _real_names(profile["other_names"], passages, char)
         if profile:
             results[char["id"]] = profile
+    if not cancelled():
+        progress("Working out who tells the book…")
+        results[NARRATOR_KEY] = find_teller(book, path)
     designed._submit(designed.BACKGROUND, unload).result()
     return results
 

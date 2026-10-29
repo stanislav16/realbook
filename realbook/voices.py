@@ -160,10 +160,12 @@ def _score(voice: dict, char: dict) -> float:
     return s
 
 
-def narrator_voice(voices: list[dict]) -> dict:
-    """Best-sounding adult voice: Kokoro's best when installed, else a Premium Apple voice."""
+def narrator_voice(voices: list[dict], gender: str = "unknown") -> dict:
+    """Best-sounding adult voice (of the teller's gender, when known): Kokoro's best when
+    installed, else a Premium Apple voice."""
     voices = [v for v in voices if not v.get("blend")]
-    preferred = ["Heart", "Ava", "Zoe", "Evan", "Daniel", "Samantha", "Moira", "Karen"]
+    voices = [v for v in voices if v.get("gender") == gender] or voices
+    preferred = ["Heart", "Ava", "Zoe", "Michael", "Evan", "Daniel", "Samantha", "Moira", "Karen"]
     def rank(v):
         bonus = (len(preferred) - preferred.index(v["base"])) if v["base"] in preferred else 0
         return (v["quality"], v["age"] == "adult", bonus)
@@ -188,8 +190,10 @@ def cast(characters: list[dict], narrator: dict | None = None) -> tuple[dict, li
     accents_on_apple = store.settings().get("apple_for_accents", True)
     narrator = narrator or {}
     if not (narrator.get("locked") and narrator.get("voice")):
-        kept = {k: narrator[k] for k in ("voice_description", "voice_take") if k in narrator}  # for designed voices
-        narrator = {**kept, "voice": narrator_voice(voices)["name"], "rate": DEFAULT_RATE, "pitch_shift": 0}
+        # voice_description/take are for designed voices; teller and gender are who tells the book
+        kept = {k: narrator[k] for k in ("voice_description", "voice_take", "teller", "gender", "profiled_by") if k in narrator}
+        narrator = {**kept, "voice": narrator_voice(voices, narrator.get("gender", "unknown"))["name"],
+                    "rate": DEFAULT_RATE, "pitch_shift": 0}
     usage: dict[str, int] = {}
     for part in _components(narrator["voice"]):
         usage[part] = 1
@@ -246,7 +250,7 @@ def _designed(engine: designed.Engine, person: dict, description: str, seed: str
 
 def _cast_designed(engine: designed.Engine, characters: list[dict], narrator: dict) -> tuple[dict, list[dict]]:
     if not (narrator.get("locked") and narrator.get("voice")):
-        narrator = _designed(engine, narrator, narrator.get("voice_description") or designed.NARRATOR_DESCRIPTION, "narrator")
+        narrator = _designed(engine, narrator, narrator.get("voice_description") or designed.narrator_description(narrator), "narrator")
     cast_chars = [c if c.get("locked") and c.get("voice") else _designed(engine, c, designed.describe_character(c), c["id"])
                   for c in characters]
     return narrator, cast_chars

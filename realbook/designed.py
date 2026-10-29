@@ -46,6 +46,14 @@ MLX_CACHE_LIMIT = 512 * 1024 * 1024
 # Words like "warm", "soft", "husky" and "rich" make Breeze's voices muffled; these keep them clear.
 NARRATOR_DESCRIPTION = ("An adult woman with a bright, clear voice and a neutral American accent, "
                         "reading a story aloud with feeling.")
+# For a book told by a man: its author, or a character telling it as "I".
+MALE_NARRATOR_DESCRIPTION = ("An adult man with a clear voice and a neutral American accent, "
+                             "reading a story aloud with feeling.")
+
+
+def narrator_description(narrator: dict) -> str:
+    """The narrator's automatic description: a man's voice when a man tells the book."""
+    return MALE_NARRATOR_DESCRIPTION if narrator.get("gender") == "male" else NARRATOR_DESCRIPTION
 # Spoken by every designed voice; lines are cloned from it. It has a statement, an exclamation and
 # a question, so the clone hears how this voice exclaims and asks: with a calm sample, "!" often
 # came out rising like a question. A more dramatic sample fixed that but made every voice too

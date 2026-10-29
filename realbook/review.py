@@ -30,6 +30,7 @@ What to check:
 2. Characters. Are gender, age group and accent right? Is anyone listed twice (merge them)? Is a character's name a vague description ("The old woman") when the book gives a better one ("Reverend Mother")? Are there "characters" that aren't people (merge them into the right person, or set their lines to "?")?
 3. Voices. For each main character, how does their voice sound? Give "sound": 2-3 words about the voice itself, from the book where it says (e.g. "sweet, musical tenor", "gravelly"), not about their personality or behaviour. Voices are read naturally; lines the book says are whispered, shouted or pleaded are read that way automatically, so don't describe acting. Avoid the words warm, soft, husky, rich, low, quiet, breathy and whisper (they make the voices muffled).
 4. Pronunciation. A text-to-speech voice guesses at unusual words and may say them differently each time. This covers every unusual word in the book, not only characters: places and planets, families and houses, organisations, invented words and titles. For words it could get wrong, give a respelling that an English reader would say correctly: one word spelled with ordinary letters, no hyphens, capitals for stress or phonetic symbols. When the name sounds like a real English word, use that word: voices say real words the same way every time, but can still guess at a made-up spelling, above all a short one on its own (e.g. "Piter": "Peter", "Feyd": "Fade", "Atreides": "Atraydeez", "Gesserit": "Guesserit"). Give a hyphenated name its own entry if its parts are respelled differently ("Feyd-Rautha": "Fayd-Rawthuh"). Leave out words that are pronounced the way they look.
+5. Narrator. Who tells the book: "author" (the author speaks to the reader in their own voice: non-fiction, a memoir), "character" (a character tells the story as "I") or "storyteller" (an unnamed voice tells a story about other people)? For an author or a character, are they a man or a woman? The narrator's voice follows this; it is listed under "Narrator" below the characters.
 
 Reply with ONE JSON code block and nothing else needed. Include ONLY changes. Format:
 
@@ -45,7 +46,8 @@ Reply with ONE JSON code block and nothing else needed. Include ONLY changes. Fo
     "duncan": {{"name": "Duncan Idaho", "gender": "male", "age": "adult", "accent": "", "pitch": "medium", "pace": "normal", "sound": "bright, easy"}}
   }},
   "merge": {{"paul-s-mother": "jessica"}},
-  "pronunciations": {{"Piter": "Peter"}}
+  "pronunciations": {{"Piter": "Peter"}},
+  "narrator": {{"teller": "author", "gender": "male"}}
 }}
 ```
 
@@ -54,6 +56,7 @@ Rules for the reply:
 - "characters" entries may contain any of: name, gender (male/female/unknown), age (child = under 13, young = 13-29, adult = 30-59, old = 60+), accent (one of: {accents}; "" if the book gives none), pitch (low/medium/high), pace (slow/normal/fast), sound.
 - "merge" maps a duplicate's id to the id of the same person; its lines move there.
 - "pronunciations" maps a word as written in the book (a name, place, group or invented word) to how to say it.
+- "narrator" has teller (author/character/storyteller) and gender (male/female/unknown); include it only if the listed narrator is wrong.
 - Leave out everything that is already right. If nothing needs changing, reply with "speakers": {{}}.
 """
 
@@ -65,6 +68,12 @@ def _cast_table(book: dict) -> str:
         rows.append(f"| {c['id']} | {c['name']} | {aka} | {c.get('lines', 0)} | {c.get('gender', '')} | {c.get('age', '')} | "
                     f"{c.get('accent', '')} | {c.get('sound', '')} | {c.get('manner', '')} |")
     return "\n".join(rows)
+
+
+def _narrator_line(book: dict) -> str:
+    n = book.get("narrator") or {}
+    teller = n.get("teller") or local_analyzer.teller_of(book)
+    return f"teller: {teller}, gender: {n.get('gender', 'unknown')}"
 
 
 def _chapter_text(book: dict, ci: int) -> str:
@@ -96,7 +105,7 @@ def parts(book: dict) -> list[tuple[str, str]]:
     out = []
     for k, group in enumerate(groups, 1):
         head = (f"# {book['title']}: RealBook review, part {k} of {len(groups)} (chapters {group[0]}–{group[-1]})\n\n"
-                f"{instructions}\n## Characters\n\n{_cast_table(book)}\n\n# The text\n\n")
+                f"{instructions}\n## Characters\n\n{_cast_table(book)}\n\n## Narrator\n\n{_narrator_line(book)}\n\n# The text\n\n")
         out.append((f"Part {k} of {len(groups)}.md", head + "\n\n".join(_chapter_text(book, ci) for ci in group)))
     return out
 
@@ -237,10 +246,17 @@ def apply(book: dict, text: str) -> dict:
     if said:
         book["pronunciations"] = {**book.get("pronunciations", {}), **said}
 
+    told = data.get("narrator") if isinstance(data.get("narrator"), dict) else {}
+    narrator = 0
+    if told.get("teller") in ("author", "character", "storyteller"):
+        gender = told.get("gender") if told.get("gender") in ("male", "female") and told["teller"] != "storyteller" else "unknown"
+        local_analyzer.set_teller(book, {"teller": told["teller"], "gender": gender}, "review")
+        narrator = 1
+
     store.recount_lines(book)
     book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
     import time
 
     book.setdefault("ai_done", {})["review"] = time.time()
-    return {"speakers": speakers, "characters": profiles, "added": added, "merged": merged, "said": len(said), "skipped": skipped[:20],
+    return {"speakers": speakers, "characters": profiles, "added": added, "merged": merged, "said": len(said), "narrator": narrator, "skipped": skipped[:20],
             "skipped_count": len(skipped)}

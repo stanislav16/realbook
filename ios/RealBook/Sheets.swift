@@ -91,11 +91,13 @@ struct CastSheet: View {
                 Section {
                     ForEach(player.cast.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { m in
                         CastRow(member: m)
+                            .listRowBackground(Color.clear)
                     }
                 } footer: {
                     Text("Change voices, rename characters and re-cast in RealBook on your Mac. Hold a line on the page to change who says it.")
                 }
             }
+            .scrollContentBackground(.hidden)
             .navigationTitle("Cast")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search characters")
@@ -161,17 +163,21 @@ struct SpeakerPicker: View {
                 if let line {
                     Section {
                         Text("“\(line.text)”").font(.system(.subheadline, design: .serif)).foregroundStyle(.secondary).lineLimit(4)
+                            .listRowBackground(Color.clear)
                     }
                 }
                 Section {
                     ForEach(player.cast.filter { !$0.id.isEmpty && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }) { m in
                         row(m.name, color: m.color, chosen: line?.speaker == m.id) { choose(m.id) }
+                            .listRowBackground(Color.clear)
                     }
                     if search.isEmpty {
                         row("Unknown (narrator reads it)", color: nil, chosen: line?.speaker == nil) { choose(nil) }
+                            .listRowBackground(Color.clear)
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
             .navigationTitle("Who Says This?")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $search, prompt: "Search characters")

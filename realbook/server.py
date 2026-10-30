@@ -174,6 +174,28 @@ def reset_remote():
     return remote.reset_token()
 
 
+@app.get("/api/models/search")
+def search_models(q: str = "", sort: str = "trending", english: bool = True):
+    """Text-to-speech models on Hugging Face, to spot a better voice engine when one comes out."""
+    try:
+        return model_finder.search(q.strip()[:100], sort, english)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+
+
+class Link(BaseModel):
+    url: str
+
+
+@app.post("/api/open-link")
+def open_link(link: Link):
+    """Open a model page in the default browser (only Hugging Face pages)."""
+    if not link.url.startswith("https://huggingface.co/"):
+        raise HTTPException(400, "Only Hugging Face links can be opened")
+    system.open_url(link.url)
+    return {"ok": True}
+
+
 @app.post("/api/open-voice-settings")
 def open_voice_settings():
     """Open where the system offers more voices: VoiceOver Utility on a Mac, Speech settings on Windows."""

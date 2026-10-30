@@ -70,6 +70,8 @@ struct PlayerScreen: View {
                 }
             }
             .environment(\.colorScheme, systemScheme)
+            // Black in dark mode, as everywhere else in the app.
+            .presentationBackground(Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white }))
         }
         .onAppear { player.open(bookID, library: library) }
         .task(id: bookID) { cover = await library.cover(bookID) }
@@ -393,8 +395,10 @@ struct ChapterList: View {
                             }
                         }
                         .id(i)
+                        .listRowBackground(Color.clear)
                     }
                 }
+                .scrollContentBackground(.hidden)
                 .onAppear { proxy.scrollTo(player.chapter, anchor: .center) }
             }
             .navigationTitle("Chapters")

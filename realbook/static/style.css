@@ -11,6 +11,7 @@
   --elevated: #ffffff;
   --sidebar: #f0f0f2;
   --control: #ffffff;
+  --field: #ffffff;
   --control-border: rgba(0, 0, 0, .14);
   --fill: rgba(0, 0, 0, .05);
   --fill-strong: rgba(0, 0, 0, .09);
@@ -29,15 +30,16 @@
     --tertiary: #636366;
     --separator: rgba(255, 255, 255, .12);
     --window: #000000;  /* black, as on the iPhone */
-    --elevated: #1c1c1e;
+    --elevated: #000000;  /* menus and dialogs are black too, set apart by a fine edge */
     --sidebar: #111112;
-    --control: #3a3a3c;
-    --control-border: rgba(255, 255, 255, .14);
+    --control: #2c2c2e;
+    --field: #000000;
+    --control-border: rgba(255, 255, 255, .16);
     --fill: rgba(255, 255, 255, .07);
     --fill-strong: rgba(255, 255, 255, .12);
     --selected: rgba(255, 255, 255, .1);
     --shadow-cover: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .5);
-    --shadow-pop: 0 0 0 .5px rgba(255, 255, 255, .14), 0 12px 40px rgba(0, 0, 0, .5);
+    --shadow-pop: 0 0 0 .5px rgba(255, 255, 255, .22), 0 12px 40px rgba(0, 0, 0, .6);
     --danger: #ff453a;
   }
 }
@@ -60,7 +62,7 @@ svg { flex: none; }
 .button.danger { background: var(--danger); border-color: transparent; color: #fff; }
 .button.small { height: 22px; padding: 0 8px; font-size: 12px; }
 .button:disabled { opacity: .45; }
-select, input[type=text], input[type=password], input[type=search] { height: 26px; padding: 0 8px; border-radius: 6px; border: .5px solid var(--control-border); background: var(--control); outline: none; }
+select, input[type=text], input[type=password], input[type=search] { height: 26px; padding: 0 8px; border-radius: 6px; border: .5px solid var(--control-border); background: var(--field); outline: none; }
 select:focus, input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 .icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 0; background: none; color: inherit; }
 .icon svg { width: 20px; height: 20px; }
@@ -125,7 +127,7 @@ body.dragging .drop { display: block; }
 /* ------------------------------------------------------------------ reader themes */
 .reader { --page-bg: #ffffff; --page-ink: #1d1d1f; --page-muted: #86868b; --page-hl: rgba(0, 0, 0, .07); --material: rgba(246, 246, 246, .82); --page-line: rgba(0, 0, 0, .08); }
 @media (prefers-color-scheme: dark) {
-  .reader[data-theme=original] { --page-bg: #000000; --page-ink: #e5e5e7; --page-muted: #8e8e93; --page-hl: rgba(255, 255, 255, .11); --material: rgba(44, 44, 46, .82); --page-line: rgba(255, 255, 255, .1); }
+  .reader[data-theme=original] { --page-bg: #000000; --page-ink: #e5e5e7; --page-muted: #8e8e93; --page-hl: rgba(255, 255, 255, .11); --material: rgba(28, 28, 30, .85); --page-line: rgba(255, 255, 255, .1); }
 }
 .reader[data-theme=paper] { --page-bg: #f3f0e8; --page-ink: #2b2925; --page-muted: #8c867a; --page-hl: rgba(70, 50, 20, .1); --material: rgba(234, 230, 220, .85); --page-line: rgba(60, 50, 30, .1); }
 .reader[data-theme=sepia] { --page-bg: #f1e4c9; --page-ink: #3d2f1f; --page-muted: #957d5c; --page-hl: rgba(80, 50, 15, .12); --material: rgba(232, 218, 190, .85); --page-line: rgba(80, 55, 20, .12); }
@@ -279,6 +281,7 @@ body.native.mac .panel.left .panel-head { padding-top: 52px; }  /* under the win
 .menu hr { border: 0; border-top: .5px solid var(--separator); margin: 4px 6px; }
 dialog { border: 0; border-radius: 12px; padding: 20px; width: min(460px, calc(100vw - 32px)); background: var(--elevated); color: var(--label); box-shadow: var(--shadow-pop); }
 dialog::backdrop { background: rgba(0, 0, 0, .25); }
+@media (prefers-color-scheme: dark) { dialog::backdrop { background: rgba(0, 0, 0, .6); } }
 dialog h3 { margin: 0 0 8px; font-size: 15px; }
 dialog p { margin: 0 0 12px; }
 .field { display: grid; gap: 4px; margin-bottom: 12px; font-weight: 500; }
@@ -293,7 +296,7 @@ dialog p { margin: 0 0 12px; }
 .info-grid dt { color: var(--secondary); }
 .info-grid dd { margin: 0; }
 body:has(#reader:not(.hidden)) .toast { bottom: 200px; }
-.toast { position: fixed; left: 50%; bottom: 40px; pointer-events: none; transform: translateX(-50%); padding: 9px 15px; border-radius: 10px; background: rgba(30, 30, 30, .9); color: #fff; z-index: 60; font-size: 13px; max-width: 90vw; backdrop-filter: blur(10px); }
+.toast { position: fixed; left: 50%; bottom: 40px; pointer-events: none; transform: translateX(-50%); padding: 9px 15px; border-radius: 10px; background: rgba(0, 0, 0, .88); box-shadow: 0 0 0 .5px rgba(255, 255, 255, .22), 0 6px 24px rgba(0, 0, 0, .35); color: #fff; z-index: 60; font-size: 13px; max-width: 90vw; backdrop-filter: blur(10px); }
 
 @media (max-width: 900px) {
   .library { grid-template-columns: 180px minmax(0, 1fr); }
@@ -373,7 +376,7 @@ a.button { text-decoration: none; display: inline-flex; align-items: center; }
 dialog:has(.review-paste), dialog:has(.review-steps) { width: min(560px, calc(100vw - 32px)); }
 .say-rows { display: grid; gap: 6px; margin: 10px 0; max-height: 46vh; overflow-y: auto; }
 .say-row { display: grid; grid-template-columns: 1fr auto 1fr auto auto; gap: 6px; align-items: center; }
-.say-row input { min-width: 0; height: 26px; padding: 0 8px; border-radius: 6px; border: .5px solid var(--control-border); background: var(--field, var(--control)); }
+.say-row input { min-width: 0; height: 26px; padding: 0 8px; border-radius: 6px; border: .5px solid var(--control-border); background: var(--field); }
 .cast-search { padding: 0 12px 8px; }
 .cast-search input, .menu-search { width: 100%; height: 26px; border-radius: 6px; border: .5px solid transparent; font-size: 13px; }
 .menu-search { margin: 0 0 4px; height: 24px; }

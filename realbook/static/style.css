@@ -170,14 +170,15 @@ body.native.mac .reader-toolbar { padding-left: 84px; }  /* room for the window 
 .round-btn svg { width: 18px; height: 18px; }
 .round-btn:hover, .round-btn.active { background: color-mix(in srgb, var(--page-ink) 20%, transparent); }
 
-/* body: the cover or the text. Chapters and Cast slide over it, from the toolbar to the bottom of
-   the window, so the text doesn't reflow under the line being read. */
+/* body: the cover or the text. Chapters and Cast slide over everything as side sheets, the full
+   height of the window, so they have clean edges on either view and the text doesn't reflow. */
 .reader-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; overflow: clip; }
-.panel { position: absolute; top: 52px; bottom: 0; z-index: 5; overflow: hidden auto; overscroll-behavior: contain; background: color-mix(in srgb, var(--page-bg) 94%, var(--page-ink)); visibility: hidden; transition: transform .22s ease, visibility .22s; box-shadow: 0 0 30px rgba(0, 0, 0, .28); }
+.panel { position: absolute; top: 0; bottom: 0; z-index: 5; overflow: hidden auto; overscroll-behavior: contain; background: color-mix(in srgb, var(--page-bg) 94%, var(--page-ink)); visibility: hidden; transition: transform .22s ease, visibility .22s; box-shadow: 0 0 30px rgba(0, 0, 0, .28); }
 .panel.left { left: 0; width: 300px; max-width: 100%; border-right: .5px solid var(--page-line); transform: translateX(-102%); }
 .panel.right { right: 0; width: 360px; max-width: 100%; border-left: .5px solid var(--page-line); transform: translateX(102%); }
 .reader.show-toc .panel.left, .reader.show-cast .panel.right { visibility: visible; transform: none; }
-.panel-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 10px; font-size: 15px; font-weight: 700; background: inherit; }
+body.native.mac .panel.left .panel-head { padding-top: 52px; }  /* under the window buttons */
+.panel-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 10px 12px 10px 16px; font-size: 15px; font-weight: 700; background: inherit; }
 .cast-actions { display: flex; align-items: center; gap: 6px; }
 .round-btn.small { width: 24px; height: 24px; }
 .round-btn.small svg { width: 14px; height: 14px; }
@@ -345,7 +346,7 @@ body.remote .mac-only { display: none !important; }
   .reader-toolbar { height: calc(48px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0; }
   #back span { display: none; }
   .tb-title { padding: 0 4px; font-size: 12px; }
-  .panel { top: calc(48px + env(safe-area-inset-top)); }
+  .panel-head { padding-top: calc(10px + env(safe-area-inset-top)); }
   .panel.left, .panel.right { width: 100%; }
   .page { padding: 12px 20px 24px; }
   .player { width: calc(100% - 40px); padding-bottom: calc(10px + env(safe-area-inset-bottom)); }

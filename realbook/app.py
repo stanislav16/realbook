@@ -23,6 +23,7 @@ SHORTCUTS = {
     "Previous Chapter": "",  # ⌘←
     "Show Contents": "1",
     "Show Cast": "2",
+    "Show Text": "3",
 }
 
 
@@ -138,6 +139,7 @@ class Shell:
                 MenuAction("Previous Chapter", js("jumpChapter(-1)")),
             ]),
             Menu("Book", [
+                MenuAction("Show Text", js("toggleText()")),
                 MenuAction("Show Contents", js("togglePanel('toc')")),
                 MenuAction("Show Cast", js("togglePanel('cast')")),
                 *([MenuSeparator(), MenuAction("Export Audiobook…", js("S.book && exportBook(S.book)"))] if system.CAN_EXPORT else []),

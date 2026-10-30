@@ -63,34 +63,39 @@
     </main>
   </div>
 
-  <!-- Reader -->
+  <!-- Reader: the book playing, as on the iPhone. Its cover and the line being read, or (Text) the
+       whole chapter; the same controls below both. -->
   <div id="reader" class="view reader hidden">
+    <div class="np-backdrop" id="np-backdrop"></div>
     <header class="reader-toolbar pywebview-drag-region">
       <div class="tb-group pywebview-drag-region">
         <button class="tb-btn" id="back" title="Library (⌘L)">
           <svg viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Library</span>
         </button>
-        <button class="tb-btn icon-only" id="toc-btn" title="Contents (⌘1)">
-          <svg viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="5" cy="6.5" r="1.2" fill="currentColor"/><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="5" cy="17.5" r="1.2" fill="currentColor"/></svg>
-        </button>
       </div>
       <div class="tb-title pywebview-drag-region" id="book-title"></div>
       <div class="tb-group right pywebview-drag-region">
-        <button class="tb-btn aa" id="aa-btn" title="Appearance"><span class="aa-small">A</span><span class="aa-big">A</span></button>
-        <button class="tb-btn icon-only" id="cast-btn" title="Cast (⌘2)">
-          <svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.2 19c.6-3.3 3-5 5.8-5s5.2 1.7 5.8 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="16.6" cy="9.4" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16.2 14.1c2.5-.2 4.3 1.3 4.7 4.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        </button>
-        <button class="tb-btn icon-only web-only mac-only" data-action="settings" title="Settings">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <button class="round-btn" id="more-btn" title="Cast, text size and theme">
+          <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18" cy="12" r="1.7" fill="currentColor"/></svg>
         </button>
       </div>
     </header>
     <div class="reader-body">
       <aside class="panel left" id="toc">
-        <div class="panel-head">Contents</div>
+        <div class="panel-head">Chapters</div>
         <div id="toc-list" class="toc-list"></div>
       </aside>
+      <section class="nowplaying" id="nowplaying">
+        <div class="np-cover" id="now-cover"></div>
+        <div class="np-title" id="np-title"></div>
+        <div class="np-chapter" id="now-chapter"></div>
+        <div class="np-lines" id="np-lines" title="Show the text">
+          <div class="np-side" id="np-before"></div>
+          <div class="np-current"><span class="np-who hidden" id="now-speaker"></span><div id="np-line"></div></div>
+          <div class="np-side" id="np-after"></div>
+        </div>
+      </section>
       <article class="page" id="page"></article>
       <aside class="panel right" id="cast">
         <div class="panel-head">
@@ -106,27 +111,29 @@
       </aside>
     </div>
     <footer class="player" id="player">
-      <div class="player-now">
-        <div class="now-cover" id="now-cover"></div>
-        <div class="player-text">
-          <div class="now-who"><span class="dot" id="now-dot"></span><span class="now-speaker" id="now-speaker">Narrator</span></div>
-          <div class="now-chapter" id="now-chapter"></div>
-        </div>
+      <div class="scrub">
+        <input type="range" id="scrub" min="0" max="0" value="0" step="1" aria-label="Line in this chapter">
+        <div class="scrub-labels"><span id="pos-left"></span><span id="pos-right"></span></div>
       </div>
       <div class="player-controls">
-        <button class="icon" id="prev" title="Previous line (←)"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 6v12z" fill="currentColor"/></svg></button>
+        <button class="icon" id="prev" title="Previous line (←)"><svg viewBox="0 0 24 24"><path d="M5 5h2.6v14H5zM9 12l10-7v14z" fill="currentColor"/></svg></button>
         <button class="icon play" id="play" title="Play / pause (space)">
           <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>
           <svg id="icon-pause" class="hidden" viewBox="0 0 24 24"><path d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z" fill="currentColor"/></svg>
         </button>
-        <button class="icon" id="next" title="Next line (→)"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z" fill="currentColor"/></svg></button>
+        <button class="icon" id="next" title="Next line (→)"><svg viewBox="0 0 24 24"><path d="M16.4 5H19v14h-2.6zM15 12 5 19V5z" fill="currentColor"/></svg></button>
       </div>
-      <div class="player-extra">
-        <div class="progress" title="Progress in this chapter"><div id="progress-bar"></div></div>
-        <select id="speed" title="Playback speed">
-          <option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.15">1.15×</option>
-          <option value="1.3">1.3×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
-        </select>
+      <div class="player-row">
+        <button class="row-item" id="speed-btn" title="Playback speed"><span class="row-icon"><b id="speed-label">1×</b></span><span>Speed</span></button>
+        <button class="row-item" id="sleep-btn" title="Stop playing after a while">
+          <span class="row-icon"><svg viewBox="0 0 24 24"><path d="M19.5 14.6A7.8 7.8 0 0 1 9.4 4.5a7.8 7.8 0 1 0 10.1 10.1Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span><span id="sleep-label">Sleep</span>
+        </button>
+        <button class="row-item" id="text-btn" title="Show the text (⌘3)">
+          <span class="row-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 10.5h16M4 15h10M4 19.5h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span>Text</span>
+        </button>
+        <button class="row-item" id="toc-btn" title="Chapters (⌘1)">
+          <span class="row-icon"><svg viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="5" cy="6.5" r="1.2" fill="currentColor"/><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="5" cy="17.5" r="1.2" fill="currentColor"/></svg></span><span>Chapters</span>
+        </button>
       </div>
     </footer>
   </div>

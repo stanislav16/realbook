@@ -21,7 +21,8 @@ const FONTS = {
   sf: ["San Francisco", '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif'],
 };
 const SIZES = [14, 15, 16, 17, 18, 20, 22, 24, 27, 30];
-const DEFAULT_LOOK = { theme: "original", font: "newyork", size: 5, justify: true, colorDialogue: true };
+const DEFAULT_LOOK = { theme: "original", font: "newyork", size: 5, justify: true, colorDialogue: true, showText: false };
+const SPEEDS = [0.8, 1, 1.15, 1.3, 1.5, 1.75, 2];
 
 const S = {
   config: { claude: false, appearance: {} },
@@ -411,6 +412,9 @@ async function openBook(id) {
   $("#reader").classList.remove("hidden");
   $("#book-title").textContent = book.title;
   $("#now-cover").replaceChildren(coverEl(book));
+  $("#np-title").textContent = book.title;
+  const [g1, g2] = COVER_GRADIENTS[hash(book.title) % COVER_GRADIENTS.length];
+  $("#np-backdrop").style.backgroundImage = book.cover ? `url("/api/books/${book.id}/cover")` : `linear-gradient(160deg, ${g1}, ${g2})`;
   showJob(book.job);
   if (book.job?.state === "running") pollJob();
   await loadChapter(book.position.chapter || 0, book.position.segment || 0);
@@ -439,7 +443,7 @@ function togglePanel(which) {
   if (!S.book) return;
   const r = $("#reader");
   const on = r.classList.toggle(`show-${which}`);
-  $(which === "toc" ? "#toc-btn" : "#cast-btn").classList.toggle("active", on);
+  if (which === "toc") $("#toc-btn").classList.toggle("on", on);
   if (on && which === "toc") $("#toc-list .current")?.scrollIntoView({ block: "center" });
 }
 
@@ -516,15 +520,24 @@ function highlight(jump = false) {
       node.scrollIntoView({ block: "center", behavior: jump ? "auto" : "smooth" });
     }
   }
-  const seg = S.chapter?.segments[S.segIdx];
+  // The cover view: the line being read, who says it, and the lines either side.
+  const segs = S.chapter?.segments || [];
+  const seg = segs[S.segIdx];
   const c = seg && seg.kind === "dialogue" ? charById(seg.speaker) : null;
-  const now = $("#now-speaker");
-  now.textContent = c ? c.name : seg && seg.kind === "dialogue" ? "Unknown speaker" : "Narrator";
-  const color = c ? colorOf(c.id) : "";
-  now.style.setProperty("--c", color || "var(--page-ink)");
-  $("#now-dot").style.setProperty("--c", color || "var(--page-muted)");
+  const who = $("#now-speaker");
+  who.classList.toggle("hidden", !c);
+  if (c) { who.textContent = c.name; who.style.setProperty("--c", colorOf(c.id)); }
+  const line = $("#np-line"), text = seg ? (c ? `“${seg.text}”` : seg.text) : "";
+  if (line.textContent !== text) {
+    line.textContent = text;
+    line.classList.remove("fade");
+    void line.offsetWidth;
+    line.classList.add("fade");
+  }
+  $("#np-before").textContent = segs[S.segIdx - 1]?.text || "";
+  $("#np-after").textContent = segs[S.segIdx + 1]?.text || "";
   $("#now-chapter").textContent = S.chapter ? [sectionOf(S.chapter), S.chapter.title].filter(Boolean).join(" · ") : "";
-  $("#progress-bar").style.width = S.chapter ? `${(100 * S.segIdx) / Math.max(1, S.chapter.segments.length - 1)}%` : "0";
+  showScrub();
   if ("mediaSession" in navigator && S.chapter) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: [sectionOf(S.chapter), S.chapter.title].filter(Boolean).join(" · "), artist: S.book.title, album: "RealBook",
@@ -542,6 +555,15 @@ function applyLook() {
   r.style.setProperty("--read-size", `${SIZES[L.size] ?? 20}px`);
   r.classList.toggle("justify", !!L.justify);
   r.classList.toggle("color-dialogue", !!L.colorDialogue);
+  r.classList.toggle("text-view", !!L.showText);
+  $("#text-btn").classList.toggle("on", !!L.showText);
+}
+
+// The whole chapter, or the cover and the line being read.
+function toggleText() {
+  if (!S.book) return;
+  setLook({ showText: !S.look.showText });
+  if (S.look.showText) highlight(true);
 }
 
 async function setLook(patch) {
@@ -585,7 +607,7 @@ function toggleAa(anchor) {
 
 function closePopovers() {
   $("#aa-pop").classList.add("hidden");
-  $("#aa-btn").classList.remove("active");
+  $("#more-btn").classList.remove("active");
   closeMenu();
 }
 
@@ -653,7 +675,11 @@ function onEnded() {
 }
 
 async function nextChapter() {
-  if (S.chapterIdx + 1 < S.book.toc.length) {
+  if (S.sleep?.kind === "chapter" && S.chapterIdx + 1 < S.book.toc.length) {
+    setSleep("off");
+    stop();
+    await loadChapter(S.chapterIdx + 1, 0, false);
+  } else if (S.chapterIdx + 1 < S.book.toc.length) {
     await loadChapter(S.chapterIdx + 1, 0, true);
   } else {
     stop();
@@ -675,12 +701,51 @@ function prefetchAhead() {
 }
 
 function step(delta) {
-  if (!S.chapter) return;
+  if (S.chapter) jumpTo(S.segIdx + delta);
+}
+
+function jumpTo(i) {
   const was = S.playing;
   stop(false);
-  S.segIdx = Math.max(0, Math.min(S.chapter.segments.length - 1, S.segIdx + delta));
+  S.segIdx = Math.max(0, Math.min(S.chapter.segments.length - 1, i));
   highlight();
   if (was) play(); else { setPlayingUI(); savePosition(); }
+}
+
+// The bar under the cover: which line of the chapter, dragged to move.
+function showScrub(at = null) {
+  const n = S.chapter?.segments.length || 1, bar = $("#scrub");
+  bar.max = Math.max(0, n - 1);
+  if (at === null) bar.value = S.segIdx;
+  const i = at ?? S.segIdx;
+  bar.style.setProperty("--p", `${(100 * i) / Math.max(1, n - 1)}%`);
+  $("#pos-left").textContent = `Line ${i + 1}`;
+  $("#pos-right").textContent = `of ${n}`;
+}
+
+function setSpeed(v) {
+  S.speed = v;
+  S.audio.defaultPlaybackRate = S.audio.playbackRate = v;
+  $("#speed-label").textContent = `${v}×`;
+}
+
+// Stops playing after a while, or at the end of the chapter.
+function setSleep(kind, minutes = 0) {
+  clearTimeout(S.sleepTimer);
+  clearInterval(S.sleepTick);
+  S.sleep = kind === "off" ? null : { kind, ends: Date.now() + minutes * 60000 };
+  if (kind === "minutes") {
+    S.sleepTimer = setTimeout(() => { pause(); setSleep("off"); }, minutes * 60000);
+    S.sleepTick = setInterval(showSleep, 1000);
+  }
+  showSleep();
+}
+
+function showSleep() {
+  const s = S.sleep;
+  $("#sleep-btn").classList.toggle("on", !!s);
+  const left = s ? Math.max(0, Math.round((s.ends - Date.now()) / 1000)) : 0;
+  $("#sleep-label").textContent = !s ? "Sleep" : s.kind === "chapter" ? "Chapter end" : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
 }
 
 // Coming back to this window after listening on the iPhone: carry on from where the phone got to.
@@ -1360,8 +1425,33 @@ $("#file-input").onchange = (e) => { upload(e.target.files[0]); e.target.value =
 $("#add-book").onclick = (e) => { if (window.pywebview?.api) { e.preventDefault(); window.pywebview.api.add_books(); } };
 $("#back").onclick = showLibrary;
 $("#toc-btn").onclick = () => togglePanel("toc");
-$("#cast-btn").onclick = () => togglePanel("cast");
-$("#aa-btn").onclick = (e) => { e.stopPropagation(); toggleAa(e.currentTarget); };
+$("#text-btn").onclick = toggleText;
+$("#np-lines").onclick = toggleText;
+$("#more-btn").onclick = (e) => {
+  e.stopPropagation();
+  const btn = e.currentTarget;
+  popupMenu(btn, [
+    { label: "Cast", note: "⌘2", action: () => togglePanel("cast") },
+    { label: "Text Size & Theme…", action: () => toggleAa(btn) },
+    S.config.export ? "-" : null,
+    S.config.export ? { label: "Export Audiobook…", action: () => exportBook(S.book) } : null,
+  ]);
+};
+$("#speed-btn").onclick = (e) => {
+  e.stopPropagation();
+  popupMenu(e.currentTarget, SPEEDS.map((v) => ({ label: `${v}×`, note: v === S.speed ? "✓" : "", action: () => setSpeed(v) })));
+};
+$("#sleep-btn").onclick = (e) => {
+  e.stopPropagation();
+  const k = S.sleep?.kind;
+  popupMenu(e.currentTarget, [
+    { label: "Off", note: !k ? "✓" : "", action: () => setSleep("off") },
+    ...[5, 15, 30, 45, 60].map((m) => ({ label: `${m} minutes`, action: () => setSleep("minutes", m) })),
+    { label: "End of Chapter", note: k === "chapter" ? "✓" : "", action: () => setSleep("chapter") },
+  ]);
+};
+$("#scrub").addEventListener("input", (e) => showScrub(+e.target.value));
+$("#scrub").addEventListener("change", (e) => jumpTo(+e.target.value));
 $("#cast-more").onclick = (e) => { e.stopPropagation(); castMenu(e.currentTarget); };
 $("#recast").onclick = async () => {
   const [r, voices] = await Promise.all([api(`/api/books/${S.book.id}/recast`, { method: "POST" }), api("/api/voices")]);
@@ -1376,7 +1466,6 @@ $("#page").addEventListener("scroll", (e) => $("#reader").classList.toggle("scro
 $("#play").onclick = togglePlay;
 $("#prev").onclick = () => step(-1);
 $("#next").onclick = () => step(1);
-$("#speed").onchange = (e) => { S.speed = +e.target.value; S.audio.defaultPlaybackRate = S.audio.playbackRate = S.speed; };
 S.audio.preload = "auto";
 S.audio.addEventListener("waiting", () => $("#play").classList.add("loading"));
 S.audio.addEventListener("playing", () => $("#play").classList.remove("loading"));
@@ -1386,7 +1475,7 @@ S.audio.onerror = () => { if (S.playing) { toast("Couldn't make audio for this l
 $("#cast-search").addEventListener("input", () => renderCast());
 document.addEventListener("click", (e) => {
   if (!$("#menu").contains(e.target)) closeMenu();
-  if (!$("#aa-pop").contains(e.target) && e.target !== $("#aa-btn")) { $("#aa-pop").classList.add("hidden"); $("#aa-btn").classList.remove("active"); }
+  if (!$("#aa-pop").contains(e.target)) { $("#aa-pop").classList.add("hidden"); $("#more-btn").classList.remove("active"); }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") return closePopovers();

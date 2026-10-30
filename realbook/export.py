@@ -44,6 +44,25 @@ def timeline_path(book: dict) -> Path:
     return store.book_dir(book["id"]) / "export" / "timeline.json"
 
 
+def timeline_line(book: dict, ms: int, ci: int, si: int, who: str | None) -> list:
+    """One line of the timeline, with the paragraph and quote it belongs to, so the iPhone can lay
+    the text out as the Mac does."""
+    if si < 0:
+        return [ms, ci, si, who, book["chapters"][ci]["title"], -1, None]
+    seg = book["chapters"][ci]["segments"][si]
+    return [ms, ci, si, who, seg["text"], seg["para"], seg["q"] if seg["kind"] == "dialogue" else None]
+
+
+def timeline(book: dict) -> dict:
+    """The export's timeline; one made before lines carried their paragraph gets it added."""
+    data = json.loads(timeline_path(book).read_text())
+    chapters = book["chapters"]
+    if any(len(line) < 7 for line in data["lines"]) and all(
+            line[1] < len(chapters) and line[2] < len(chapters[line[1]]["segments"]) for line in data["lines"]):
+        data["lines"] = [timeline_line(book, ms, ci, si, who) for ms, ci, si, who, *_ in data["lines"]]
+    return data
+
+
 def status(book_id: str) -> dict:
     book = store.load(book_id)
     job = dict(_jobs.get(book_id, {"state": "idle"}))
@@ -189,9 +208,8 @@ def _run(book_id: str) -> None:
             "chapters": [{"ms": ms, "title": title, "chapter": ci} for ms, title, ci in chapters],
             "speakers": {sid: names.get(sid, sid) for sid in {w[3] for w in lines if w[3]}},
             "colors": {c["id"]: PALETTE[i % len(PALETTE)] for i, c in enumerate(book["characters"])},
-            # [start ms, chapter, segment (-1: the chapter's title), speaker id or null, text]
-            "lines": [[ms, ci, si, who, book["chapters"][ci]["segments"][si]["text"] if si >= 0 else book["chapters"][ci]["title"]]
-                      for ms, ci, si, who in lines],
+            # [start ms, chapter, segment (-1: the chapter's title), speaker id or null, text, paragraph, quote]
+            "lines": [timeline_line(book, ms, ci, si, who) for ms, ci, si, who in lines],
         }
         timeline_path(book).write_text(json.dumps(timeline, ensure_ascii=False, separators=(",", ":")))
         job.update(state="done", message=f"Audiobook ready: {_duration(caf.frames / RATE)} long")

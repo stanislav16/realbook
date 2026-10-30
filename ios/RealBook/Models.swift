@@ -29,6 +29,9 @@ struct RemoteBook: Codable, Identifiable {
     var cover: String?
     var position: MacPosition
     var progress: Double
+    var finished: Bool?
+    var opened: Double?
+    var chapters: Int?
     var export: Export
 }
 
@@ -40,13 +43,16 @@ struct Timeline: Codable {
         var chapter: Int
     }
 
-    /// One spoken line: [start ms, chapter, segment (-1: the chapter's title), speaker id or null, text].
+    /// One spoken line: [start ms, chapter, segment (-1: the chapter's title), speaker id or null, text,
+    /// paragraph, quote]. Copies made before the last two came along leave them out.
     struct Line: Codable {
         var ms: Int
         var chapter: Int
         var segment: Int
         var speaker: String?
         var text: String
+        var para: Int?
+        var q: Int?
 
         init(from decoder: Decoder) throws {
             var c = try decoder.unkeyedContainer()
@@ -55,6 +61,8 @@ struct Timeline: Codable {
             segment = try c.decode(Int.self)
             speaker = try c.decodeIfPresent(String.self)
             text = try c.decode(String.self)
+            if !c.isAtEnd { para = try c.decodeIfPresent(Int.self) }
+            if !c.isAtEnd { q = try c.decodeIfPresent(Int.self) }
         }
 
         func encode(to encoder: Encoder) throws {
@@ -64,8 +72,13 @@ struct Timeline: Codable {
             try c.encode(segment)
             try c.encode(speaker)
             try c.encode(text)
+            try c.encode(para)
+            try c.encode(q)
         }
     }
+
+    /// Lines carry their paragraph (newer copies), so the page can be laid out as on the Mac.
+    var hasParagraphs: Bool { lines.first { $0.segment >= 0 }?.para != nil }
 
     var made: Double
     var ms: Int
@@ -120,14 +133,30 @@ struct LocalBook: Codable, Identifiable {
 
 /// A book's details on the Mac (GET /api/books/{id}), for listening live.
 struct MacBook: Codable {
-    struct Member: Codable { var id: String; var name: String }
-    struct Entry: Codable { var title: String; var segments: Int }
+    struct Member: Codable {
+        var id: String
+        var name: String
+        var summary: String?
+        var lines: Int?
+        var designed_from: String?
+        var voice: String?
+        var rate: Int?
+        var pitch_shift: Int?
+    }
+    struct Narrator: Codable {
+        var designed_from: String?
+        var voice: String?
+        var rate: Int?
+        var pitch_shift: Int?
+    }
+    struct Entry: Codable { var title: String; var section: String?; var segments: Int }
 
     var id: String
     var title: String
     var author: String
     var cover: String?
     var position: MacPosition
+    var narrator: Narrator?
     var cast: [Member]
     var toc: [Entry]
 
@@ -148,9 +177,52 @@ struct MacChapter: Codable {
         var kind: String
         var text: String
         var para: Int
+        var q: Int?
         var speaker: String?
     }
 
     var title: String
+    var section: String?
     var segments: [Segment]
+}
+
+/// A line as the reading page shows it, from the Mac's chapter or an offline copy's timeline.
+struct PageLine: Equatable {
+    var segment: Int
+    var text: String
+    var para: Int
+    var dialogue: Bool
+    var q: Int?
+    var speaker: String?  // the character's id
+}
+
+/// Someone with a voice in the book: the cast sheet, the speaker picker and the page's labels.
+struct CastMember: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var color: String?
+    var summary: String?
+    var lines: Int?
+    var voice: String?  // how the voice was described when it was made
+    var sample: VoiceSample?
+}
+
+/// What the Mac needs to say something in a character's voice.
+struct VoiceSample: Equatable {
+    var voice: String
+    var rate: Int
+    var pitchShift: Int
+}
+
+/// A cover for a book without one: the same colours the Mac picks for it.
+let coverGradients = [("#3d5a80", "#1d2d44"), ("#8d3b3b", "#4a1c1c"), ("#2f6f5e", "#163a31"), ("#6a4c93", "#35264a"),
+                      ("#9a6b2f", "#4f3516"), ("#2f6d80", "#163843"), ("#5e6b3a", "#2f361c"), ("#7a3e65", "#3d1f33")]
+
+/// The Mac's hash() of a title, to pick the same gradient.
+func titleHash(_ s: String) -> Int {
+    var h: Int32 = 0
+    for scalar in s.unicodeScalars {
+        h = h &* 31 &+ Int32(String(scalar).utf16.first ?? 0)
+    }
+    return Int(h.magnitude)
 }

@@ -12,7 +12,14 @@ struct ShelfBook: Identifiable {
         if let l = local, l.durationMs > 0 { return Double(l.positionMs) / Double(l.durationMs) }
         return remote?.progress ?? 0
     }
-    var lastListened: Double { max(local?.positionUpdated ?? 0, remote?.position.updated ?? 0) }
+    var lastListened: Double { max(local?.positionUpdated ?? 0, remote?.position.updated ?? 0, remote?.opened ?? 0) }
+    var finished: Bool { remote?.finished ?? (progress >= 0.999) }
+    var started: Bool { progress > 0 && !finished }
+}
+
+/// The Mac's sidebar: Reading Now, All Books, Finished.
+enum Shelf: String, CaseIterable {
+    case reading = "Reading Now", all = "All Books", finished = "Finished"
 }
 
 struct LibraryView: View {
@@ -20,6 +27,8 @@ struct LibraryView: View {
     @Environment(Player.self) private var player
     @State private var pairing = false
     @State private var path: [String] = []
+    @State private var filter = Shelf(rawValue: UserDefaults.standard.string(forKey: "shelf") ?? "") ?? .all
+    @State private var search = ""
 
     private var shelf: [ShelfBook] {
         let remote = Dictionary(uniqueKeysWithValues: library.remote.map { ($0.id, $0) })
@@ -33,7 +42,17 @@ struct LibraryView: View {
     private var current: ShelfBook? {
         let books = shelf
         if let id = player.bookID, let b = books.first(where: { $0.id == id }) { return b }
-        return books.filter { $0.progress > 0 && $0.progress < 0.999 }.max { $0.lastListened < $1.lastListened }
+        return books.filter(\.started).max { $0.lastListened < $1.lastListened }
+    }
+
+    private var shown: [ShelfBook] {
+        var books = shelf.filter { search.isEmpty || "\($0.title) \($0.author)".localizedCaseInsensitiveContains(search) }
+        switch filter {
+        case .reading: books = books.filter(\.started).sorted { $0.lastListened > $1.lastListened }
+        case .finished: books = books.filter(\.finished)
+        case .all: break
+        }
+        return books
     }
 
     var body: some View {
@@ -41,19 +60,34 @@ struct LibraryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     if !library.paired { pairCard }
-                    if let book = current {
-                        ContinueCard(book: book) { path.append(book.id) }
+                    if !shelf.isEmpty {
+                        Picker("Show", selection: $filter) {
+                            ForEach(Shelf.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: filter) { _, f in UserDefaults.standard.set(f.rawValue, forKey: "shelf") }
+                    }
+                    if let book = current, search.isEmpty, filter != .finished {
+                        ContinueCard(book: book) { play in
+                            if play { player.open(book.id, library: library, play: true) }
+                            path.append(book.id)
+                        }
                     }
                     if !shelf.isEmpty {
-                        VStack(alignment: .leading, spacing: 14) {
-                            Text("Library").font(.title2.bold())
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 18, alignment: .top)], spacing: 22) {
-                                ForEach(shelf) { book in
-                                    Button { path.append(book.id) } label: { ShelfTile(book: book) }
-                                        .buttonStyle(.plain)
-                                        .contextMenu { menu(for: book) }
-                                }
+                        let books = shown
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 18, alignment: .top)], spacing: 22) {
+                            ForEach(books) { book in
+                                Button { path.append(book.id) } label: { ShelfTile(book: book) }
+                                    .buttonStyle(.plain)
+                                    .contextMenu { menu(for: book) }
                             }
+                        }
+                        if books.isEmpty {
+                            Text(!search.isEmpty ? "No books match your search."
+                                 : filter == .reading ? "Books you've started will appear here."
+                                 : "Books you finish will appear here.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity).padding(.vertical, 40)
                         }
                     }
                     if library.paired { macStatus }
@@ -62,7 +96,8 @@ struct LibraryView: View {
                 .padding(.bottom, 24)
             }
             .navigationTitle("RealBook")
-            .navigationDestination(for: String.self) { id in PlayerView(bookID: id) }
+            .searchable(text: $search, prompt: "Search")
+            .navigationDestination(for: String.self) { id in ReaderView(bookID: id) }
             .refreshable { await library.sync() }
             .toolbar {
                 if library.paired {
@@ -151,40 +186,47 @@ struct LibraryView: View {
     }
 }
 
-/// The book you're in, to carry on with one tap.
+/// The book you're in, to carry on with one tap: the same card as at the top of the Mac's library.
 struct ContinueCard: View {
     @Environment(Player.self) private var player
     let book: ShelfBook
-    let open: () -> Void
+    let open: (_ play: Bool) -> Void
 
     var body: some View {
+        let playing = player.bookID == book.id && player.playing
         HStack(spacing: 16) {
-            BookCover(id: book.id, title: book.title).frame(width: 84, height: 126)
-                .shadow(color: .black.opacity(0.35), radius: 10, y: 5)
+            BookCover(id: book.id, title: book.title, author: book.author).frame(width: 84, height: 126)
+                .shadow(color: .black.opacity(0.3), radius: 10, y: 5)
             VStack(alignment: .leading, spacing: 5) {
                 Text("CONTINUE LISTENING").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
                 Text(book.title).font(.system(.title3, design: .serif).weight(.semibold)).lineLimit(2)
-                Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                ProgressView(value: book.progress).padding(.top, 4)
-                HStack {
-                    Text("\(Int(book.progress * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        if player.bookID == book.id { player.toggle() } else { open() }
-                    } label: {
-                        Image(systemName: player.bookID == book.id && player.playing ? "pause.fill" : "play.fill")
-                            .font(.title3).frame(width: 44, height: 44)
-                            .foregroundStyle(Color(uiColor: .systemBackground))
-                            .background(Color(uiColor: .label), in: Circle())
-                    }
-                    .buttonStyle(.plain)
+                Text(meta).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                ProgressView(value: book.progress).padding(.vertical, 3)
+                Button {
+                    if player.bookID == book.id { player.toggle() } else { open(true) }
+                } label: {
+                    Label(playing ? "Pause" : "Resume", systemImage: playing ? "pause.fill" : "play.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .background(Color(uiColor: .label), in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .contentShape(Rectangle())
-        .onTapGesture(perform: open)
+        .onTapGesture { open(false) }
+    }
+
+    /// "Frank Herbert · Chapter 3 of 48 · 12%", as on the Mac.
+    private var meta: String {
+        var parts = [book.author].filter { !$0.isEmpty }
+        if let r = book.remote, let n = r.chapters { parts.append("Chapter \(r.position.chapter + 1) of \(n)") }
+        parts.append("\(max(1, Int(book.progress * 100)))%")
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -194,16 +236,31 @@ struct ShelfTile: View {
     let book: ShelfBook
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            BookCover(id: book.id, title: book.title)
+        VStack(alignment: .leading, spacing: 6) {
+            BookCover(id: book.id, title: book.title, author: book.author)
                 .aspectRatio(2 / 3, contentMode: .fit)
                 .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
                 .overlay(alignment: .bottomTrailing) { badge.padding(6) }
-            if book.progress > 0 {
-                ProgressView(value: book.progress).scaleEffect(y: 0.7)
-            }
+            progress
             Text(book.title).font(.caption.weight(.semibold)).lineLimit(2)
             Text(state).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+
+    /// As under the Mac's covers: NEW, how far through, or Finished.
+    @ViewBuilder private var progress: some View {
+        if book.finished {
+            Text("Finished").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+        } else if book.progress > 0 {
+            HStack(spacing: 6) {
+                ProgressView(value: book.progress).scaleEffect(y: 0.7)
+                Text("\(max(1, Int(book.progress * 100)))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        } else {
+            Text("NEW").font(.caption2.weight(.bold)).tracking(0.4)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .foregroundStyle(.secondary)
+                .background(.fill.secondary, in: Capsule())
         }
     }
 
@@ -232,10 +289,11 @@ struct BookCover: View {
     @Environment(Library.self) private var library
     let id: String
     let title: String
+    var author = ""
     @State private var image: UIImage?
 
     var body: some View {
-        CoverImage(image: image, title: title)
+        CoverImage(image: image, title: title, author: author)
             .task(id: id) { image = await library.cover(id) }
     }
 }
@@ -243,16 +301,37 @@ struct BookCover: View {
 struct CoverImage: View {
     let image: UIImage?
     let title: String
+    var author = ""
 
     var body: some View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
-                LinearGradient(colors: [Color(white: 0.32), Color(white: 0.14)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .overlay(alignment: .bottomLeading) {
-                        Text(title).font(.system(size: 9, weight: .semibold, design: .serif)).foregroundStyle(.white).padding(5)
-                    }
+                // The Mac's cover for a book without one: its colours, the title and the author.
+                let (top, bottom) = coverGradients[titleHash(title) % coverGradients.count]
+                GeometryReader { g in
+                    let w = g.size.width
+                    LinearGradient(colors: [Color(UIColor(hex: top)), Color(UIColor(hex: bottom))],
+                                   startPoint: UnitPoint(x: 0.33, y: 0), endPoint: UnitPoint(x: 0.67, y: 1))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 2).strokeBorder(.white.opacity(0.28), lineWidth: 1).padding(w * 0.06)
+                        }
+                        .overlay {
+                            VStack(spacing: 0) {
+                                Text(title).font(.system(size: max(5, w * 0.12), weight: .semibold, design: .serif))
+                                    .multilineTextAlignment(.center).lineLimit(5).minimumScaleFactor(0.6)
+                                Spacer(minLength: 0)
+                                if !author.isEmpty && w > 60 {
+                                    Text(author.uppercased()).font(.system(size: max(5, w * 0.068))).tracking(w * 0.008)
+                                        .multilineTextAlignment(.center).lineLimit(2).opacity(0.85)
+                                }
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.top, w * 0.24).padding(.horizontal, w * 0.12).padding(.bottom, w * 0.14)
+                            .opacity(w > 40 ? 1 : 0)
+                        }
+                }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
@@ -260,6 +339,7 @@ struct CoverImage: View {
     }
 }
 
+/// The book playing, above the shelf: who's speaking and the chapter, as in the Mac's player.
 struct MiniPlayer: View {
     @Environment(Player.self) private var player
     let id: String
@@ -269,10 +349,12 @@ struct MiniPlayer: View {
         HStack(spacing: 12) {
             BookCover(id: id, title: player.title).frame(width: 34, height: 51)
             VStack(alignment: .leading, spacing: 2) {
-                Text(player.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                if player.chapterTitles.indices.contains(player.chapter) {
-                    Text(player.chapterTitles[player.chapter]).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 6) {
+                    Circle().fill(player.current?.color.map { Color(UIColor(hex: $0)) } ?? Color.secondary.opacity(0.6)).frame(width: 8, height: 8)
+                    Text(player.current?.speaker ?? "Narrator").font(.subheadline.weight(.semibold)).lineLimit(1)
                 }
+                Text(player.chapterTitles.indices.contains(player.chapter) ? player.chapterTitles[player.chapter] : player.title)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             Button { player.toggle() } label: {

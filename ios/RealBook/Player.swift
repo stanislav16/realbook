@@ -10,6 +10,7 @@ import UIKit
 @Observable
 final class Player {
     enum Mode: String { case offline, live }
+    enum Sleep: Hashable { case off, minutes(Int), endOfChapter }
 
     /// A line as it's shown: its text, who says it (nil: the narrator) and their colour.
     struct Spoken: Hashable {
@@ -29,6 +30,17 @@ final class Player {
     private(set) var before: Spoken?
     private(set) var current: Spoken?
     private(set) var after: Spoken?
+    /// The chapter as the reading page shows it, and the line being read in it.
+    private(set) var page: [PageLine] = []
+    private(set) var pageTitle = ""
+    private(set) var pageSection: String?
+    private(set) var segment = 0
+    /// Bumps when the page's text or speakers change, so the page lays itself out again.
+    private(set) var revision = 0
+    private(set) var notice: String?
+    private(set) var sleep = Sleep.off
+    private(set) var sleepEnds: Date?
+    private(set) var sampling: String?  // whose voice sample is loading or playing
     var speed: Float = UserDefaults.standard.object(forKey: "speed") as? Float ?? 1 {
         didSet {
             UserDefaults.standard.set(speed, forKey: "speed")
@@ -38,6 +50,13 @@ final class Player {
     }
 
     static let speeds: [Float] = [0.8, 1, 1.15, 1.3, 1.5, 1.75, 2]
+
+    #if DEBUG
+    /// `-silent YES`: plays everything at no volume, for trying playback without making a sound.
+    private static let volume: Float = UserDefaults.standard.bool(forKey: "silent") ? 0 : 1
+    #else
+    private static let volume: Float = 1
+    #endif
 
     private var library: Library?
     private var artwork: UIImage?
@@ -49,10 +68,13 @@ final class Player {
     private var lastSaved = Date.distantPast
 
     // MARK: live from the Mac
-    private var macBook: MacBook?
+    private var macBook: MacBook?  // also fetched for an offline copy, for its cast, when the Mac is near
     private var segments: [MacChapter.Segment] = []
-    private var segment = 0
     private var live: AVAudioPlayer?
+    private var liveKey = ""       // the line `live` is playing, to carry on with it after a pause
+    private var playWhenLoaded = false
+    private var sampler: AVAudioPlayer?
+    private var sleepTask: Task<Void, Never>?
     private let finished = Finished()
     private var lines: [String: Data] = [:]  // "chapter:segment" -> audio
     private var fetching: [String: Task<Data, Error>] = [:]
@@ -63,6 +85,7 @@ final class Player {
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
         offline.automaticallyWaitsToMinimizeStalling = false
+        offline.volume = Self.volume
         offline.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 4), queue: .main) { [weak self] time in
             MainActor.assumeIsolated { self?.tick(time) }
         }
@@ -82,17 +105,31 @@ final class Player {
     var hasOfflineCopy: Bool { bookID.flatMap { library?.book($0) } != nil }
 
     /// Opens a book: its offline copy if this iPhone has one, else live from the Mac.
-    func open(_ id: String, library: Library) {
+    func open(_ id: String, library: Library, play start: Bool = false) {
         self.library = library
-        guard bookID != id else { return }
+        guard bookID != id else {
+            if start && !playing { play() }
+            return
+        }
         stopAll()
         bookID = id
         problem = nil
+        notice = nil
         artwork = nil
+        playWhenLoaded = start
         Task { artwork = await library.cover(id); updateNowPlaying() }
         if let book = library.book(id), let t = library.timeline(id), !t.lines.isEmpty {
             title = book.title
             startOffline(book, t, at: book.positionMs)
+            if start { play() }
+            Task {
+                await library.refreshTimeline(id)  // older copies: their page's paragraphs
+                if bookID == id, mode == .offline, let fresh = library.timeline(id), fresh.hasParagraphs, timeline?.hasParagraphs == false {
+                    timeline = fresh
+                    buildOfflinePage()
+                }
+                await loadCast(id)
+            }
         } else {
             // Not on this iPhone: live from the Mac (asking it where the reader is, if not known yet).
             mode = .live
@@ -133,7 +170,9 @@ final class Player {
         gapTask?.cancel()
         live?.stop()
         live = nil
+        liveKey = ""
         macBook = nil
+        page = []
         segments = []
         lines = [:]
         fetching.values.forEach { $0.cancel() }
@@ -146,7 +185,29 @@ final class Player {
         chapterTitles = t.chapters.map(\.title)
         offline.replaceCurrentItem(with: AVPlayerItem(url: Library.audio(of: book.id)))
         offline.currentItem?.audioTimePitchAlgorithm = .timeDomain
+        chapter = -1  // so the page is made for wherever this starts
         seek(to: position, save: false)
+    }
+
+    /// The Mac's details of a book that plays from its offline copy: who's in it, and how they sound.
+    private func loadCast(_ id: String) async {
+        guard macBook == nil, let library, library.reachable, let book = try? await library.mac.book(id), bookID == id else { return }
+        macBook = book
+        if mode == .offline { buildOfflinePage() }
+    }
+
+    /// The reading page for the offline copy's chapter, from its timeline.
+    private func buildOfflinePage() {
+        guard let t = timeline, t.chapters.indices.contains(chapter) else { return }
+        let ci = t.chapters[chapter].chapter
+        var n = 0
+        page = t.lines.filter { $0.chapter == ci && $0.segment >= 0 }.map { l in
+            n += 1
+            return PageLine(segment: l.segment, text: l.text, para: l.para ?? n, dialogue: l.q != nil || l.speaker != nil, q: l.q, speaker: l.speaker)
+        }
+        pageTitle = t.chapters[chapter].title
+        pageSection = macBook.flatMap { $0.toc.indices.contains(ci) ? $0.toc[ci].section : nil }.flatMap { $0.isEmpty || $0 == pageTitle ? nil : $0 }
+        revision += 1
     }
 
     private func startLive(at chapter: Int, segment: Int) async {
@@ -161,9 +222,11 @@ final class Player {
             title = book.title
             chapterTitles = book.toc.map(\.title)
             try await loadChapter(chapter, at: segment)
+            if playWhenLoaded { play() }
         } catch {
             problem = error.localizedDescription
         }
+        playWhenLoaded = false
     }
 
     private func loadChapter(_ n: Int, at seg: Int) async throws {
@@ -173,6 +236,10 @@ final class Player {
         chapter = n
         segments = ch.segments
         segment = max(0, min(seg, segments.count - 1))
+        page = segments.map { PageLine(segment: $0.id, text: $0.text, para: $0.para, dialogue: $0.kind == "dialogue", q: $0.q, speaker: $0.speaker) }
+        pageTitle = ch.title
+        pageSection = ch.section.flatMap { $0.isEmpty || $0 == ch.title ? nil : $0 }
+        revision += 1
         showLiveLine()
         updateNowPlaying()
     }
@@ -190,20 +257,32 @@ final class Player {
             offline.playImmediately(atRate: speed)
             playing = true
         case .live:
-            guard !segments.isEmpty else { return }
+            guard !segments.isEmpty else {
+                playWhenLoaded = loading
+                return
+            }
             playing = true
-            playLiveLine()
+            if let live, liveKey == key(chapter, segment), live.currentTime > 0 {
+                live.rate = speed
+                live.play()  // carry on where the line was paused
+            } else {
+                playLiveLine()
+            }
         }
+        sampler?.stop()
+        sampling = nil
         updateNowPlaying()
     }
 
     func pause() {
         let was = playing
         playing = false
+        playWhenLoaded = false
         offline.pause()
         live?.pause()
         gapTask?.cancel()
         playTask?.cancel()
+        loading = false
         if mode == .offline { savePosition() }
         updateNowPlaying()
         if was, let library { Task { await library.sync() } }
@@ -235,6 +314,20 @@ final class Player {
 
     func skip(seconds: Int) {
         if mode == .offline { seek(to: ms + seconds * 1000) } else if seconds < 0 { previousLine() } else { nextLine() }
+    }
+
+    /// Plays from a line of the page (tapped there).
+    func play(from s: Int) {
+        switch mode {
+        case .offline:
+            guard let t = timeline, t.chapters.indices.contains(chapter) else { return }
+            seek(to: t.ms(chapter: t.chapters[chapter].chapter, segment: s))
+            if !playing { play() }
+        case .live:
+            if !playing { live?.stop(); liveKey = "" }
+            goToLine(s)
+            if !playing { play() }
+        }
     }
 
     func goTo(chapter n: Int) {
@@ -327,8 +420,14 @@ final class Player {
         }
         let c = t.chapterIndex(at: ms)
         if c != chapter {
+            let ended = chapter >= 0 && c == chapter + 1 && playing
             chapter = c
+            buildOfflinePage()
             updateNowPlaying()
+            if ended && sleep == .endOfChapter {
+                setSleep(.off)
+                pause()
+            }
         }
     }
 
@@ -369,7 +468,9 @@ final class Player {
                 p.enableRate = true
                 p.rate = speed
                 p.delegate = finished
+                p.volume = Self.volume
                 live = p
+                liveKey = key(c, s)
                 p.play()
                 fetchAhead()
             } catch is CancellationError {
@@ -407,10 +508,15 @@ final class Player {
                 saveLivePosition()
                 playLiveLine()
             } else if chapter + 1 < chapterTitles.count {
+                let stop = sleep == .endOfChapter
+                if stop {
+                    setSleep(.off)
+                    pause()
+                }
                 do {
                     try await loadChapter(chapter + 1, at: 0)
                     saveLivePosition()
-                    playLiveLine()
+                    if !stop { playLiveLine() }
                 } catch {
                     problem = error.localizedDescription
                     pause()
@@ -425,6 +531,7 @@ final class Player {
         guard mode == .live, !segments.isEmpty else { return }
         gapTask?.cancel()
         live?.stop()
+        liveKey = ""
         segment = max(0, min(s, segments.count - 1))
         showLiveLine()
         saveLivePosition()
@@ -453,6 +560,130 @@ final class Player {
             library?.setLivePosition(chapter: c, segment: s, of: id)
         }
     }
+
+    // MARK: - cast
+
+    /// The narrator, then everyone with a voice, most lines first.
+    var cast: [CastMember] {
+        if let b = macBook {
+            let colors = b.colors
+            let narrator = CastMember(id: "", name: "Narrator", summary: "Reads everything that isn't said aloud", voice: b.narrator?.designed_from,
+                                      sample: b.narrator?.voice.map { VoiceSample(voice: $0, rate: b.narrator?.rate ?? 180, pitchShift: b.narrator?.pitch_shift ?? 0) })
+            return [narrator] + b.cast.sorted { ($0.lines ?? 0) > ($1.lines ?? 0) }.map { m in
+                CastMember(id: m.id, name: m.name, color: colors[m.id], summary: m.summary, lines: m.lines, voice: m.designed_from,
+                           sample: m.voice.map { VoiceSample(voice: $0, rate: m.rate ?? 180, pitchShift: m.pitch_shift ?? 0) })
+            }
+        }
+        guard let t = timeline else { return [] }
+        return [CastMember(id: "", name: "Narrator")] + t.speakers.sorted { $0.value < $1.value }.map {
+            CastMember(id: $0.key, name: $0.value, color: t.colors?[$0.key])
+        }
+    }
+
+    func name(of id: String?) -> String? {
+        guard let id else { return nil }
+        return macBook?.cast.first { $0.id == id }?.name ?? timeline?.speakers[id] ?? id
+    }
+
+    func color(of id: String?) -> String? {
+        guard let id else { return nil }
+        return macBook?.colors[id] ?? timeline?.colors?[id]
+    }
+
+    /// Changing who says a line needs the Mac.
+    var canChangeSpeakers: Bool { library?.reachable == true && macBook != nil }
+
+    /// Gives a quote (every line of it) to someone else on the Mac (nil: the narrator reads it).
+    func setSpeaker(_ speaker: String?, segment s: Int) async {
+        guard let id = bookID, let library else { return }
+        let ci = mode == .offline ? (timeline.flatMap { $0.chapters.indices.contains(chapter) ? $0.chapters[chapter].chapter : nil } ?? chapter) : chapter
+        do {
+            let r = try await library.mac.setSpeaker(speaker, chapter: ci, segment: s, of: id)
+            guard bookID == id else { return }
+            macBook?.cast = r.cast
+            switch mode {
+            case .live:
+                for i in r.changed where segments.indices.contains(i) { segments[i].speaker = speaker }
+                for i in r.changed { lines[key(ci, i)] = nil }
+                page = segments.map { PageLine(segment: $0.id, text: $0.text, para: $0.para, dialogue: $0.kind == "dialogue", q: $0.q, speaker: $0.speaker) }
+                revision += 1
+                showLiveLine()
+                if playing && r.changed.contains(segment) { goToLine(segment) }  // say it again in the new voice
+            case .offline:
+                library.setSpeaker(speaker, chapter: ci, segments: r.changed, of: id)
+                timeline = library.timeline(id)
+                buildOfflinePage()
+                current = nil
+                updateOfflineLine()
+                notice = "Changed on your Mac. This iPhone's offline copy keeps the old voice until you download an update; Live from Mac uses the new one."
+            }
+        } catch {
+            problem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func dismissNotice() { notice = nil }
+
+    /// A character's voice, saying one of their lines from this chapter.
+    func sample(_ member: CastMember) {
+        guard let v = member.sample, let id = bookID, let library else { return }
+        if sampling == member.id {
+            sampler?.stop()
+            sampling = nil
+            return
+        }
+        pause()
+        sampler?.stop()
+        sampling = member.id
+        let said = page.first { $0.dialogue && $0.speaker == member.id && $0.text.count > 25 }?.text ?? ""
+        Task {
+            do {
+                let data = try await library.mac.sample(v, text: said)
+                guard sampling == member.id, bookID == id else { return }
+                try? AVAudioSession.sharedInstance().setActive(true)
+                let p = try AVAudioPlayer(data: data)
+                p.delegate = sampleDone
+                p.volume = Self.volume
+                sampler = p
+                p.play()
+            } catch {
+                if sampling == member.id { sampling = nil }
+                problem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
+    }
+
+    @ObservationIgnored private lazy var sampleDone: Finished = {
+        let f = Finished()
+        f.done = { [weak self] in self?.sampling = nil }
+        return f
+    }()
+
+    // MARK: - sleep timer
+
+    func setSleep(_ s: Sleep) {
+        sleepTask?.cancel()
+        sleep = s
+        sleepEnds = nil
+        guard case .minutes(let m) = s else { return }
+        let ends = Date().addingTimeInterval(TimeInterval(m * 60))
+        sleepEnds = ends
+        sleepTask = Task {
+            try? await Task.sleep(for: .seconds(ends.timeIntervalSinceNow))
+            guard !Task.isCancelled else { return }
+            pause()
+            sleep = .off
+            sleepEnds = nil
+        }
+    }
+
+    #if DEBUG
+    /// Where playback is, for the simulator's test scripts.
+    var debugState: String {
+        let at = mode == .live ? (live?.currentTime ?? -1) : Double(ms) / 1000
+        return "mode=\(mode.rawValue) playing=\(playing) chapter=\(chapter) segment=\(segment) line=\(liveKey) at=\(String(format: "%.2f", at))"
+    }
+    #endif
 
     // MARK: - lock screen
 

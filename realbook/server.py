@@ -639,10 +639,10 @@ def cancel_export(book_id: str):
 
 @app.get("/api/books/{book_id}/export/timeline")
 def export_timeline(book_id: str):
-    path = export.timeline_path(_book(book_id))
-    if not path.exists():
+    b = _book(book_id)
+    if not export.timeline_path(b).exists():
         raise HTTPException(404, "Export the audiobook first")
-    return FileResponse(path, media_type="application/json")
+    return export.timeline(b)
 
 
 # ------------------------------------------------------------------ iPhone app

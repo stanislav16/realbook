@@ -51,6 +51,7 @@ final class MacClient {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 120  // each request sets its own, shorter, timeout
         config.waitsForConnectivity = false
+        config.urlCache = nil  // a line's audio changes when its speaker does
         return URLSession(configuration: config)
     }()
 
@@ -120,6 +121,31 @@ final class MacClient {
     /// One line's audio, made on the Mac if it hasn't been yet (which can take a few seconds).
     func line(_ segment: Int, chapter: Int, of id: String, ahead: Bool = false) async throws -> Data {
         try await data("api/books/\(id)/audio/\(chapter)/\(segment)", query: ahead ? [URLQueryItem(name: "prefetch", value: "1")] : [],
+                       timeout: 120)
+    }
+
+    /// Gives a quote to another character (nil: the narrator reads it). Returns the lines that changed
+    /// and the cast with its new line counts.
+    func setSpeaker(_ speaker: String?, chapter: Int, segment: Int, of id: String) async throws -> (changed: [Int], cast: [MacBook.Member]) {
+        struct Body: Encodable { var speaker: String? }
+        struct Reply: Decodable { var changed: [Int]; var cast: [MacBook.Member] }
+        let body = try JSONEncoder().encode(Body(speaker: speaker))
+        let data = try await data("api/books/\(id)/chapters/\(chapter)/segments/\(segment)/speaker", method: "PUT", body: body)
+        let r = try JSONDecoder().decode(Reply.self, from: data)
+        return (r.changed, r.cast)
+    }
+
+    /// The Mac's reading page look (the Aa menu), to start from.
+    func appearance() async throws -> [String: Any] {
+        let json = try JSONSerialization.jsonObject(with: await data("api/config", timeout: 20)) as? [String: Any]
+        return json?["appearance"] as? [String: Any] ?? [:]
+    }
+
+    /// A character's voice saying a line, made on the Mac.
+    func sample(_ v: VoiceSample, text: String) async throws -> Data {
+        try await data("api/preview", query: [URLQueryItem(name: "voice", value: v.voice), URLQueryItem(name: "rate", value: String(v.rate)),
+                                              URLQueryItem(name: "pitch_shift", value: String(v.pitchShift)),
+                                              URLQueryItem(name: "text", value: text)],
                        timeout: 120)
     }
 

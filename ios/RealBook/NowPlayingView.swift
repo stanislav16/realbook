@@ -1,16 +1,31 @@
 import SwiftUI
 
-struct PlayerView: View {
+/// The book playing, full screen: its cover, the line being read between its neighbours, and the
+/// bigger controls. Opened from the player at the bottom of the page.
+struct NowPlayingView: View {
     @Environment(Library.self) private var library
     @Environment(Player.self) private var player
     let bookID: String
+    let close: () -> Void
     @State private var scrubbing: Double?
     @State private var chapters = false
     @State private var cover: UIImage?
 
     var body: some View {
         VStack(spacing: 0) {
-            modeSwitch.padding(.top, 4)
+            ZStack {
+                modeSwitch
+                HStack {
+                    Button(action: close) {
+                        Image(systemName: "chevron.down").font(.body.weight(.semibold))
+                            .frame(width: 36, height: 36).background(.white.opacity(0.12), in: Circle())
+                    }
+                    .accessibilityLabel("Close")
+                    Spacer()
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.top, 14)
             CoverImage(image: cover, title: player.title)
                 .frame(width: 132, height: 198)
                 .shadow(color: .black.opacity(0.55), radius: 18, y: 10)
@@ -36,19 +51,10 @@ struct PlayerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backdrop)
         .tint(.white)
-        .preferredColorScheme(.dark)
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $chapters) { ChapterList(close: { chapters = false }) }
-        .onAppear { player.open(bookID, library: library) }
+        .environment(\.colorScheme, .dark)
+        .presentationBackground(.black)
+        .sheet(isPresented: $chapters) { ChapterList(close: { chapters = false }).presentationDetents([.medium, .large]) }
         .task(id: bookID) { cover = await library.cover(bookID) }
-        #if DEBUG
-        .task {
-            // For trying playback in the simulator: launch with `-autoplay YES`.
-            guard UserDefaults.standard.bool(forKey: "autoplay") else { return }
-            try? await Task.sleep(for: .seconds(4))
-            player.play()
-        }
-        #endif
     }
 
     /// The cover, blurred, behind everything. In an overlay, so its size doesn't widen the page.
@@ -181,6 +187,8 @@ struct PlayerView: View {
                     .background(.white.opacity(0.12), in: Capsule())
             }
             Spacer()
+            sleepMenu
+            Spacer()
             Button { chapters = true } label: {
                 Label("Chapters", systemImage: "list.bullet").font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 12).padding(.vertical, 6)
@@ -188,6 +196,30 @@ struct PlayerView: View {
             }
         }
         .foregroundStyle(.white)
+    }
+
+    /// Stops playing after a while, or at the end of the chapter.
+    private var sleepMenu: some View {
+        Menu {
+            Picker("Sleep Timer", selection: Binding(get: { player.sleep }, set: { player.setSleep($0) })) {
+                Text("Off").tag(Player.Sleep.off)
+                ForEach([5, 15, 30, 45, 60], id: \.self) { Text("\($0) minutes").tag(Player.Sleep.minutes($0)) }
+                Text("End of Chapter").tag(Player.Sleep.endOfChapter)
+            }
+        } label: {
+            Group {
+                if let ends = player.sleepEnds {
+                    Label { Text(timerInterval: Date.now...ends, countsDown: true).monospacedDigit() } icon: { Image(systemName: "moon.fill") }
+                } else if player.sleep == .endOfChapter {
+                    Label("Chapter end", systemImage: "moon.fill")
+                } else {
+                    Label("Sleep", systemImage: "moon.zzz")
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(.white.opacity(0.12), in: Capsule())
+        }
     }
 
     static func speedLabel(_ s: Float) -> String { s == 1 ? "1×" : String(format: "%g×", s) }

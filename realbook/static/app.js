@@ -410,6 +410,7 @@ async function openBook(id) {
   $("#library").classList.add("hidden");
   $("#reader").classList.remove("hidden");
   $("#book-title").textContent = book.title;
+  $("#now-cover").replaceChildren(coverEl(book));
   showJob(book.job);
   if (book.job?.state === "running") pollJob();
   await loadChapter(book.position.chapter || 0, book.position.segment || 0);

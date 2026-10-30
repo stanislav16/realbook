@@ -76,6 +76,36 @@ final class Library {
         return t
     }
 
+    /// Copies made before lines carried their paragraph get a new timeline from the Mac (a small
+    /// file), so their page is laid out as on the Mac.
+    func refreshTimeline(_ id: String) async {
+        guard let t = timeline(id), !t.hasParagraphs, reachable else { return }
+        let fresh = Self.folder(of: id).appendingPathComponent("timeline-new.json")
+        do {
+            try await mac.download("api/books/\(id)/export/timeline", to: fresh) { _ in }
+            let new = try JSONDecoder().decode(Timeline.self, from: Data(contentsOf: fresh))
+            guard new.lines.count == t.lines.count, new.made == t.made else {  // a different copy: leave it for Download Update
+                try? FileManager.default.removeItem(at: fresh)
+                return
+            }
+            _ = try FileManager.default.replaceItemAt(Self.timelineURL(of: id), withItemAt: fresh)
+            timelines[id] = new
+        } catch {
+            try? FileManager.default.removeItem(at: fresh)
+        }
+    }
+
+    /// A quote was given to someone else on the Mac: show it so in the offline copy's text too.
+    func setSpeaker(_ speaker: String?, chapter: Int, segments: [Int], of id: String) {
+        guard var t = timeline(id) else { return }
+        let changed = Set(segments)
+        for i in t.lines.indices where t.lines[i].chapter == chapter && changed.contains(t.lines[i].segment) {
+            t.lines[i].speaker = speaker
+        }
+        timelines[id] = t
+        try? JSONEncoder().encode(t).write(to: Self.timelineURL(of: id), options: .atomic)
+    }
+
     // MARK: - position
 
     /// Where the reader is now (called by the player as it plays).

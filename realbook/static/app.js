@@ -34,6 +34,7 @@ const S = {
   chapterIdx: 0,
   chapter: null,       // {title, segments}
   segIdx: 0,
+  following: true,
   playing: false,
   audio: new Audio(),  // one element for the whole session: WebKit only lets an element that already played keep playing
   audioKey: "",
@@ -81,13 +82,20 @@ function showDialog(form, onSave) {
   dlg.replaceChildren(form);
   return new Promise((resolve) => {
     const done = (value) => {
-      dlg.oncancel = null;
+      dlg.oncancel = dlg.onpointerdown = dlg.onpointerup = null;
       form.onsubmit = null;
       if (dlg.open) dlg.close();
       resolve(value);
     };
     form.onsubmit = (e) => { e.preventDefault(); done(onSave(form)); };
     dlg.oncancel = (e) => { e.preventDefault(); done(null); };
+    // Pressing outside the dialog closes it, unless something has been typed or changed in it.
+    let dirty = false, outside = false;
+    const beyond = (e) => { const r = dlg.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
+    form.addEventListener("input", () => { dirty = true; });
+    form.addEventListener("change", () => { dirty = true; });
+    dlg.onpointerdown = (e) => { outside = beyond(e); };
+    dlg.onpointerup = (e) => { if (outside && beyond(e) && !dirty) done(null); outside = false; };
     form.querySelectorAll("[data-cancel]").forEach((b) => (b.onclick = () => done(null)));
     dlg.showModal();
     (form.querySelector("input:not([type=checkbox]), select") || form.querySelector("button.primary, button.danger"))?.focus();
@@ -127,6 +135,9 @@ function toast(msg, ms = 3500) {
 // With `search`, a field on top filters the items that have `find` (the text to match); Return picks the first.
 function popupMenu(anchor, items, { search = false } = {}) {
   const menu = $("#menu");
+  if (!menu.classList.contains("hidden") && S.menuAnchor === anchor) return closeMenu();  // its button again: closes it
+  closePopovers();
+  S.menuAnchor = anchor;
   const buttons = items.filter(Boolean).map((it) => it === "-" ? el("hr") : el("button", {
     class: it.danger ? "danger" : "", disabled: it.disabled, "data-find": it.find?.toLowerCase(),
     onclick: (e) => { e.stopPropagation(); closeMenu(); it.action(); },
@@ -144,6 +155,7 @@ function popupMenu(anchor, items, { search = false } = {}) {
       if (e.key === "Enter") { e.preventDefault(); buttons.find((b) => b.tagName === "BUTTON" && !b.hidden && b.dataset.find !== undefined)?.click(); }
     } }) : null;
   menu.replaceChildren(...(field ? [field] : []), ...buttons);
+  menu.style.left = menu.style.top = "0";  // measured at full width, wherever it last was
   menu.classList.remove("hidden");
   const r = anchor.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
@@ -151,7 +163,7 @@ function popupMenu(anchor, items, { search = false } = {}) {
   menu.style.top = `${below + menu.offsetHeight > innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`;
   field?.focus();
 }
-function closeMenu() { $("#menu").classList.add("hidden"); }
+function closeMenu() { $("#menu").classList.add("hidden"); S.menuAnchor = null; }
 
 const charById = (id) => S.book?.cast.find((c) => c.id === id);
 const colorOf = (id) => {
@@ -166,6 +178,7 @@ const FILTER_TITLES = { reading: "Reading Now", all: "All Books", finished: "Fin
 async function showLibrary() {
   stop();
   closePopovers();
+  closePanels();
   S.book = null;
   history.replaceState(null, "", location.pathname + location.search);
   $("#reader").classList.add("hidden");
@@ -403,6 +416,7 @@ async function upload(file) {
 async function openBook(id) {
   stop();
   closePopovers();
+  closePanels();
   const [book, voices] = await Promise.all([api(`/api/books/${id}`), api("/api/voices")]);
   S.voices = voices;
   S.book = book;
@@ -431,10 +445,10 @@ function renderToc() {
   S.book.toc.forEach((c, i) => {
     const section = sectionOf(c);
     if (section && section !== current) {
-      rows.push(el("button", { class: "toc-section", onclick: () => loadChapter(i, 0, S.playing) }, section));
+      rows.push(el("button", { class: "toc-section", onclick: () => pickChapter(i) }, section));
     }
     current = section || c.section || null;
-    rows.push(el("button", { class: `${i === S.chapterIdx ? "current" : ""} ${section ? "nested" : ""}`, onclick: () => loadChapter(i, 0, S.playing) }, c.title));
+    rows.push(el("button", { class: `${i === S.chapterIdx ? "current" : ""} ${section ? "nested" : ""}`, onclick: () => pickChapter(i) }, c.title));
   });
   $("#toc-list").replaceChildren(...rows);
 }
@@ -443,8 +457,22 @@ function togglePanel(which) {
   if (!S.book) return;
   const r = $("#reader");
   const on = r.classList.toggle(`show-${which}`);
-  if (which === "toc") $("#toc-btn").classList.toggle("on", on);
-  if (on && which === "toc") $("#toc-list .current")?.scrollIntoView({ block: "center" });
+  if (which === "toc") {
+    $("#toc-btn").classList.toggle("on", on);
+    const list = $("#toc"), current = $("#toc-list .current");
+    if (on && current) list.scrollTop = current.offsetTop - list.clientHeight / 2;
+  }
+}
+
+function closePanels() {
+  $("#reader").classList.remove("show-toc", "show-cast");
+  $("#toc-btn").classList.remove("on");
+}
+
+function pickChapter(i) {
+  closePanels();
+  follow();
+  loadChapter(i, 0, S.playing);
 }
 
 async function loadChapter(n, seg = 0, autoplay = false) {
@@ -499,7 +527,7 @@ function renderPage() {
     p.append(el("span", {
       class: cls, "data-i": i,
       style: seg.kind === "dialogue" && seg.speaker ? `--c:${colorOf(seg.speaker)}` : null,
-      onclick: () => { S.segIdx = i; play(); },
+      onclick: () => { follow(); S.segIdx = i; play(); },
     }, text), " ");
   });
   inner.append(el("div", { class: "chapter-nav" },
@@ -509,16 +537,47 @@ function renderPage() {
   page.scrollTop = scroll;
 }
 
+// Keeps the line being read in view, unless the reader has scrolled away to look at something else.
+function follow() {
+  clearTimeout(S.followTimer);
+  S.following = true;
+  $("#follow-btn").classList.add("hidden");
+}
+
+function scrolledAway() {
+  S.following = false;
+  clearTimeout(S.scrollCheck);
+  $("#follow-btn").classList.remove("hidden");
+  clearTimeout(S.followTimer);
+  // Carry on following a little after the scrolling stops, if the book is playing.
+  S.followTimer = setTimeout(function again() {
+    if (!S.playing) { S.followTimer = setTimeout(again, 2000); return; }
+    follow();
+    highlight();
+  }, 8000);
+}
+
+function scrollToLine(node, jump) {
+  const page = $("#page");
+  if (!page.clientHeight) return;  // on the cover view
+  const r = node.getBoundingClientRect(), pr = page.getBoundingClientRect();
+  if (!jump && r.top >= pr.top + 60 && r.bottom <= pr.bottom - 60) return;
+  // Only the page moves: scrollIntoView would also move anything around it that can scroll.
+  const top = Math.max(0, Math.min(page.scrollHeight - page.clientHeight, page.scrollTop + r.top - pr.top - Math.max(40, (pr.height - r.height) * 0.3)));
+  clearTimeout(S.scrollCheck);
+  page.scrollTo({ top, behavior: jump ? "auto" : "smooth" });
+  // A smooth scroll can stall, never moving, while the window isn't being drawn (behind another
+  // window, say). So if the page hasn't got there shortly after, put it there.
+  if (!jump) S.scrollCheck = setTimeout(() => { if (S.following && Math.abs(page.scrollTop - top) > 2) page.scrollTop = top; }, 700);
+}
+
 function highlight(jump = false) {
   $$(".seg.now").forEach((n) => n.classList.remove("now"));
   const node = $(`.seg[data-i="${S.segIdx}"]`);
+  if (jump) follow();
   if (node) {
     node.classList.add("now");
-    const page = $("#page");
-    const r = node.getBoundingClientRect(), pr = page.getBoundingClientRect();
-    if (jump || r.top < pr.top + 60 || r.bottom > pr.bottom - 110) {
-      node.scrollIntoView({ block: "center", behavior: jump ? "auto" : "smooth" });
-    }
+    if (S.following) scrollToLine(node, jump);
   }
   // The cover view: the line being read, who says it, and the lines either side.
   const segs = S.chapter?.segments || [];
@@ -566,6 +625,7 @@ function toggleText() {
   if (S.look.showText) highlight(true);
 }
 
+
 async function setLook(patch) {
   Object.assign(S.look, patch);
   applyLook();
@@ -583,7 +643,7 @@ function renderAa() {
       el("button", { title: "Larger text", onclick: () => setLook({ size: Math.min(SIZES.length - 1, L.size + 1) }) }, "A")),
     el("div", { class: "aa-themes" }, ...THEMES.map(([id, name, bg, ink]) =>
       el("button", { class: `theme-swatch ${L.theme === id ? "current" : ""}`, onclick: () => setLook({ theme: id }) },
-        el("span", { style: id === "original" ? "background:linear-gradient(135deg,#fff 50%,#1e1e1e 50%);color:#888" : `background:${bg};color:${ink}` }, "Aa"),
+        el("span", { style: id === "original" ? "background:linear-gradient(135deg,#fff 50%,#000 50%);color:#888" : `background:${bg};color:${ink}` }, "Aa"),
         el("span", {}, name)))),
     el("label", { class: "pop-row" }, el("span", {}, "Font"),
       el("select", { onchange: (e) => setLook({ font: e.target.value }) },
@@ -623,6 +683,7 @@ function setPlayingUI() {
 function play() {
   if (!S.book) return;
   S.playing = true;
+  if (!S.following) { follow(); highlight(); }
   setPlayingUI();
   const key = `${S.chapterIdx}:${S.segIdx}:${S.rev}`;
   if (S.audioKey === key && S.audio.paused && S.audio.currentTime > 0 && !S.audio.ended) {
@@ -683,6 +744,9 @@ async function nextChapter() {
     await loadChapter(S.chapterIdx + 1, 0, true);
   } else {
     stop();
+    S.segIdx = Math.max(0, S.chapter.segments.length - 1);
+    highlight();
+    savePosition();
     toast("The end.");
   }
 }
@@ -1430,6 +1494,7 @@ $("#np-lines").onclick = toggleText;
 $("#more-btn").onclick = (e) => {
   e.stopPropagation();
   const btn = e.currentTarget;
+  if (!$("#aa-pop").classList.contains("hidden")) return closePopovers();  // the button again: closes it
   popupMenu(btn, [
     { label: "Cast", note: "⌘2", action: () => togglePanel("cast") },
     { label: "Text Size & Theme…", action: () => toggleAa(btn) },
@@ -1451,7 +1516,12 @@ $("#sleep-btn").onclick = (e) => {
   ]);
 };
 $("#scrub").addEventListener("input", (e) => showScrub(+e.target.value));
-$("#scrub").addEventListener("change", (e) => jumpTo(+e.target.value));
+$("#scrub").addEventListener("change", (e) => { jumpTo(+e.target.value); e.target.blur(); });  // space is play again
+$("#follow-btn").onclick = () => { follow(); highlight(true); };
+$("#page").addEventListener("wheel", scrolledAway, { passive: true });
+$("#page").addEventListener("pointerdown", (e) => { if (e.offsetX >= e.currentTarget.clientWidth) scrolledAway(); });  // its scrollbar
+document.addEventListener("visibilitychange", () => { if (!document.hidden && S.following && S.chapter) highlight(); });
+$$("[data-close-panel]").forEach((b) => { b.onclick = closePanels; });
 $("#cast-more").onclick = (e) => { e.stopPropagation(); castMenu(e.currentTarget); };
 $("#recast").onclick = async () => {
   const [r, voices] = await Promise.all([api(`/api/books/${S.book.id}/recast`, { method: "POST" }), api("/api/voices")]);
@@ -1473,12 +1543,34 @@ S.audio.addEventListener("pause", () => $("#play").classList.remove("loading"));
 S.audio.onended = onEnded;
 S.audio.onerror = () => { if (S.playing) { toast("Couldn't make audio for this line; skipping it"); onEnded(); } };
 $("#cast-search").addEventListener("input", () => renderCast());
+// Pressing anywhere else closes what's open: menus, the Aa popover, and the Chapters and Cast
+// panels. Watched on the way down, so a button that handles its own click can't hide it. A menu's
+// or panel's own button is left to toggle it. Playing or moving through the book keeps a panel open.
+document.addEventListener("pointerdown", (e) => {
+  const t = e.target, inside = (sel) => t.closest?.(sel);
+  if (!$("#dialog").open) {
+    // A press that closes something on the text only closes it: it doesn't also start that line.
+    S.swallowClick = !!inside("#page, #np-lines") && (!$("#menu").classList.contains("hidden") || !$("#aa-pop").classList.contains("hidden")
+      || $("#reader").classList.contains("show-toc") || $("#reader").classList.contains("show-cast"));
+    if (!inside("#menu") && !S.menuAnchor?.contains(t)) closeMenu();
+    if (!inside("#aa-pop") && !inside("#menu") && !inside("#more-btn")) { $("#aa-pop").classList.add("hidden"); $("#more-btn").classList.remove("active"); }
+    if (!inside("#menu") && !inside("#aa-pop") && !inside("#play, #prev, #next, #scrub")) {
+      const r = $("#reader");
+      if (!inside("#toc") && !inside("#toc-btn")) { r.classList.remove("show-toc"); $("#toc-btn").classList.remove("on"); }
+      if (!inside("#cast")) r.classList.remove("show-cast");
+    }
+  }
+}, true);
 document.addEventListener("click", (e) => {
-  if (!$("#menu").contains(e.target)) closeMenu();
-  if (!$("#aa-pop").contains(e.target)) { $("#aa-pop").classList.add("hidden"); $("#more-btn").classList.remove("active"); }
-});
+  if (S.swallowClick) { S.swallowClick = false; e.stopPropagation(); e.preventDefault(); }
+}, true);
+window.addEventListener("blur", closeMenu);
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") return closePopovers();
+  if (e.key === "Escape") {
+    if (!$("#menu").classList.contains("hidden") || !$("#aa-pop").classList.contains("hidden")) return closePopovers();
+    if (!$("#dialog").open) closePanels();
+    return;
+  }
   if (!S.book || $("#dialog").open || e.metaKey || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
   if (e.code === "Space") { e.preventDefault(); togglePlay(); }
   else if (e.key === "ArrowRight") step(1);

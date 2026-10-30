@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -25,6 +26,15 @@ SHORTCUTS = {
     "Show Cast": "2",
     "Show Text": "3",
 }
+
+
+def _dark_mode() -> bool:
+    if not system.MAC:
+        return False
+    try:
+        return subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True, timeout=2).stdout.strip() == "Dark"
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _install_menu_shortcuts() -> None:
@@ -199,6 +209,7 @@ def main() -> None:
         width=1320,
         height=880,
         min_size=(860, 600),
+        background_color="#000000" if _dark_mode() else "#FFFFFF",  # no white flash while the page loads
         js_api=Api(shell),
     )
     webview.start(shell.style_native if system.MAC else None, menu=shell.menu())

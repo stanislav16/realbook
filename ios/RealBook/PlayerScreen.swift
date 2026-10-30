@@ -14,6 +14,7 @@ struct PlayerScreen: View {
     @State private var scrubbing: Double?
     @State private var cover: UIImage?
     @State private var following = true
+    @State private var followAgain: Task<Void, Never>?
     @State private var sheet: Sheet?
 
     enum Sheet: Identifiable {
@@ -73,6 +74,7 @@ struct PlayerScreen: View {
         .onAppear { player.open(bookID, library: library) }
         .task(id: bookID) { cover = await library.cover(bookID) }
         .onChange(of: player.playing) { _, now in if now { following = true } }
+        .onChange(of: following) { _, now in if now { followAgain?.cancel() } }
         #if DEBUG
         .task { await debugScript() }
         #endif
@@ -213,7 +215,20 @@ struct PlayerScreen: View {
                     following = true
                     player.goTo(chapter: player.chapter + 1)
                 },
-                onScrolledAway: { following = false },
+                onScrolledAway: {
+                    following = false
+                    // Carry on following a little after the scrolling stops, if the book is playing.
+                    followAgain?.cancel()
+                    followAgain = Task {
+                        while !Task.isCancelled {
+                            try? await Task.sleep(for: .seconds(8))
+                            if !Task.isCancelled && player.playing {
+                                following = true
+                                return
+                            }
+                        }
+                    }
+                },
                 menu: menu
             )
             .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.035),

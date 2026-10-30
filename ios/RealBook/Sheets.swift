@@ -40,7 +40,7 @@ struct AppearanceSheet: View {
                                 .foregroundStyle(t.id == "original" ? Color.gray : Color(t.ink))
                                 .background {
                                     if t.id == "original" {
-                                        LinearGradient(stops: [.init(color: .white, location: 0.5), .init(color: Color(white: 0.12), location: 0.5)],
+                                        LinearGradient(stops: [.init(color: .white, location: 0.5), .init(color: .black, location: 0.5)],
                                                        startPoint: .topLeading, endPoint: .bottomTrailing)
                                     } else {
                                         Color(t.background)

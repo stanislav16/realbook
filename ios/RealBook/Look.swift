@@ -18,7 +18,7 @@ final class Look {
 
     static let themes: [Theme] = [
         Theme(id: "original", name: "Original",
-              background: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: "#1e1e1e") : .white },
+              background: UIColor { $0.userInterfaceStyle == .dark ? .black : .white },
               ink: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: "#e5e5e7") : UIColor(hex: "#1d1d1f") },
               muted: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: "#8e8e93") : UIColor(hex: "#86868b") },
               highlight: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.11) : UIColor(white: 0, alpha: 0.07) }),

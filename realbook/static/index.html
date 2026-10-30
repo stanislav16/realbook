@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <link rel="apple-touch-icon" href="/static/icon-180.png">
   <link rel="manifest" href="/manifest.webmanifest">
   <title>RealBook</title>
@@ -82,10 +82,6 @@
       </div>
     </header>
     <div class="reader-body">
-      <aside class="panel left" id="toc">
-        <div class="panel-head">Chapters</div>
-        <div id="toc-list" class="toc-list"></div>
-      </aside>
       <section class="nowplaying" id="nowplaying">
         <div class="np-cover" id="now-cover"></div>
         <div class="np-title" id="np-title"></div>
@@ -97,18 +93,10 @@
         </div>
       </section>
       <article class="page" id="page"></article>
-      <aside class="panel right" id="cast">
-        <div class="panel-head">
-          <span>Cast</span>
-          <div class="cast-actions">
-            <button class="button small" id="recast" title="Pick voices again for characters you haven't set by hand">Re-cast</button>
-            <button class="button small" id="cast-more" title="More">•••</button>
-          </div>
-        </div>
-        <div id="job" class="job hidden"></div>
-        <div class="cast-search"><input id="cast-search" class="search-field" type="search" placeholder="Search characters" autocomplete="off" spellcheck="false"></div>
-        <div id="cast-list" class="cast-list"></div>
-      </aside>
+      <button class="follow-btn hidden" id="follow-btn" title="Go back to the line being read">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h9M4 18h9M16 11l5 3.5-5 3.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Line Being Read
+      </button>
     </div>
     <footer class="player" id="player">
       <div class="scrub">
@@ -136,6 +124,23 @@
         </button>
       </div>
     </footer>
+    <aside class="panel left" id="toc">
+      <div class="panel-head"><span>Chapters</span><button class="round-btn small panel-close" data-close-panel title="Close (esc)"><svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+      <div id="toc-list" class="toc-list"></div>
+    </aside>
+    <aside class="panel right" id="cast">
+      <div class="panel-head">
+        <span>Cast</span>
+        <div class="cast-actions">
+          <button class="button small" id="recast" title="Pick voices again for characters you haven't set by hand">Re-cast</button>
+          <button class="button small" id="cast-more" title="More">•••</button>
+          <button class="round-btn small panel-close" data-close-panel title="Close (esc)"><svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        </div>
+      </div>
+      <div id="job" class="job hidden"></div>
+      <div class="cast-search"><input id="cast-search" class="search-field" type="search" placeholder="Search characters" autocomplete="off" spellcheck="false"></div>
+      <div id="cast-list" class="cast-list"></div>
+    </aside>
   </div>
 
   <div id="aa-pop" class="popover hidden"></div>

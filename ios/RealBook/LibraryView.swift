@@ -17,6 +17,8 @@ struct ShelfBook: Identifiable {
     var started: Bool { progress > 0 && !finished }
 }
 
+struct OpenBook: Identifiable { var id: String }
+
 /// The Mac's sidebar: Reading Now, All Books, Finished.
 enum Shelf: String, CaseIterable {
     case reading = "Reading Now", all = "All Books", finished = "Finished"
@@ -26,7 +28,7 @@ struct LibraryView: View {
     @Environment(Library.self) private var library
     @Environment(Player.self) private var player
     @State private var pairing = false
-    @State private var path: [String] = []
+    @State private var open: OpenBook?
     @State private var filter = Shelf(rawValue: UserDefaults.standard.string(forKey: "shelf") ?? "") ?? .all
     @State private var search = ""
 
@@ -56,7 +58,7 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     if !library.paired { pairCard }
@@ -70,14 +72,14 @@ struct LibraryView: View {
                     if let book = current, search.isEmpty, filter != .finished {
                         ContinueCard(book: book) { play in
                             if play { player.open(book.id, library: library, play: true) }
-                            path.append(book.id)
+                            open = OpenBook(id: book.id)
                         }
                     }
                     if !shelf.isEmpty {
                         let books = shown
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 18, alignment: .top)], spacing: 22) {
                             ForEach(books) { book in
-                                Button { path.append(book.id) } label: { ShelfTile(book: book) }
+                                Button { open = OpenBook(id: book.id) } label: { ShelfTile(book: book) }
                                     .buttonStyle(.plain)
                                     .contextMenu { menu(for: book) }
                             }
@@ -97,7 +99,7 @@ struct LibraryView: View {
             }
             .navigationTitle("RealBook")
             .searchable(text: $search, prompt: "Search")
-            .navigationDestination(for: String.self) { id in ReaderView(bookID: id) }
+            .fullScreenCover(item: $open) { book in PlayerScreen(bookID: book.id) { open = nil } }
             .refreshable { await library.sync() }
             .toolbar {
                 if library.paired {
@@ -120,8 +122,8 @@ struct LibraryView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if let id = player.bookID, path.last != id {
-                    MiniPlayer(id: id) { path.append(id) }
+                if let id = player.bookID {
+                    MiniPlayer(id: id) { open = OpenBook(id: id) }
                 }
             }
             #if DEBUG
@@ -131,7 +133,7 @@ struct LibraryView: View {
                     if library.remoteBook(id) == nil { await library.sync() }
                     if let r = library.remoteBook(id) { await library.download(r) }
                 }
-                if let id = UserDefaults.standard.string(forKey: "openBook"), path.isEmpty { path = [id] }
+                if let id = UserDefaults.standard.string(forKey: "openBook"), open == nil { open = OpenBook(id: id) }
             }
             #endif
             .task(id: library.remote.contains { $0.export.state == "running" }) {

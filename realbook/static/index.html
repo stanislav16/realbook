@@ -63,8 +63,8 @@
     </main>
   </div>
 
-  <!-- Reader: the book playing, as on the iPhone. Its cover and the line being read, or (Text) the
-       whole chapter; the same controls below both. -->
+  <!-- Reader: the book playing, as on the iPhone. Its cover, or (Text) the whole chapter; the same
+       controls below both. -->
   <div id="reader" class="view reader hidden">
     <div class="np-backdrop" id="np-backdrop"></div>
     <header class="reader-toolbar pywebview-drag-region">
@@ -83,14 +83,9 @@
     </header>
     <div class="reader-body">
       <section class="nowplaying" id="nowplaying">
-        <div class="np-cover" id="now-cover"></div>
+        <div class="np-stage"><div class="np-cover" id="now-cover" title="Show the text"></div></div>
         <div class="np-title" id="np-title"></div>
         <div class="np-chapter" id="now-chapter"></div>
-        <div class="np-lines" id="np-lines" title="Show the text">
-          <div class="np-side" id="np-before"></div>
-          <div class="np-current"><span class="np-who hidden" id="now-speaker"></span><div id="np-line"></div></div>
-          <div class="np-side" id="np-after"></div>
-        </div>
       </section>
       <article class="page" id="page"></article>
       <button class="follow-btn hidden" id="follow-btn" title="Go back to the line being read">

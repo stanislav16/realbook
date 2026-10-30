@@ -27,9 +27,7 @@ final class Player {
     private(set) var problem: String?
     private(set) var chapterTitles: [String] = []
     private(set) var chapter = 0
-    private(set) var before: Spoken?
     private(set) var current: Spoken?
-    private(set) var after: Spoken?
     /// The chapter as the reading page shows it, and the line being read in it.
     private(set) var page: [PageLine] = []
     private(set) var pageTitle = ""
@@ -414,8 +412,6 @@ final class Player {
         let now = spoken(t.lines[i])
         if now != current {
             current = now
-            before = i > 0 ? spoken(t.lines[i - 1]) : nil
-            after = i + 1 < t.lines.count ? spoken(t.lines[i + 1]) : nil
             segment = max(0, t.lines[i].segment)
         }
         let c = t.chapterIndex(at: ms)
@@ -547,8 +543,6 @@ final class Player {
             return Spoken(text: s.text, speaker: who.map { names[$0] ?? $0 }, color: who.flatMap { colors[$0] })
         }
         current = spoken(segments[segment])
-        before = segment > 0 ? spoken(segments[segment - 1]) : nil
-        after = segment + 1 < segments.count ? spoken(segments[segment + 1]) : nil
     }
 
     private func saveLivePosition() {

@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// A book playing, full screen: its cover and the line being read, or (Text) the whole chapter laid
-/// out as on the Mac. The controls below are the same for both.
+/// A book playing, full screen: only its cover, or (Text) only the whole chapter, laid out as on the
+/// Mac. The controls below are the same for both.
 struct PlayerScreen: View {
     @Environment(Library.self) private var library
     @Environment(Player.self) private var player
@@ -143,59 +143,24 @@ struct PlayerScreen: View {
 
     // MARK: - middle
 
+    /// Only the cover, as big as it fits, at its own shape. Tapping it shows the text.
     private var coverView: some View {
         VStack(spacing: 0) {
-            CoverImage(image: cover, title: player.title)
-                .frame(width: 150, height: 225)
-                .shadow(color: .black.opacity(0.55), radius: 18, y: 10)
-                .padding(.top, 22)
+            CoverImage(image: cover, title: player.title, radius: 10)
+                .aspectRatio(cover.map { $0.size.width / max(1, $0.size.height) } ?? 2 / 3, contentMode: .fit)
+                .shadow(color: .black.opacity(0.55), radius: 22, y: 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { showText = true }
+                .padding(.top, 16)
             VStack(spacing: 3) {
                 Text(player.title).font(.headline).multilineTextAlignment(.center).lineLimit(2)
                 if player.chapterTitles.indices.contains(player.chapter) {
                     Text(player.chapterTitles[player.chapter]).font(.subheadline).foregroundStyle(muted).lineLimit(1)
                 }
             }
-            .padding(.top, 14)
-            lines
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onTapGesture { showText = true }  // the whole chapter, as with lyrics
+            .padding(.vertical, 16)
         }
-    }
-
-    /// The line being read, between the lines before and after it.
-    private var lines: some View {
-        VStack(spacing: 12) {
-            if let before = player.before {
-                Text(before.text).font(.system(.subheadline, design: .serif)).foregroundStyle(.white.opacity(0.32))
-                    .lineLimit(2).multilineTextAlignment(.center)
-            }
-            if let line = player.current {
-                VStack(spacing: 8) {
-                    if let who = line.speaker {
-                        Text(who.uppercased()).font(.caption2.weight(.bold)).tracking(0.8)
-                            .foregroundStyle(Color(speaker: line.color) ?? .white)
-                            .padding(.horizontal, 9).padding(.vertical, 4)
-                            .background((Color(speaker: line.color) ?? .white).opacity(0.18), in: Capsule())
-                    }
-                    Text(line.speaker == nil ? line.text : "“\(line.text)”")
-                        .font(.system(.title3, design: .serif))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(7)
-                        .minimumScaleFactor(0.8)
-                        .contentTransition(.opacity)
-                        .animation(.easeOut(duration: 0.15), value: line)
-                }
-            } else if player.loading {
-                ProgressView().tint(.white)
-            }
-            if let after = player.after {
-                Text(after.text).font(.system(.subheadline, design: .serif)).foregroundStyle(.white.opacity(0.32))
-                    .lineLimit(2).multilineTextAlignment(.center)
-            }
-        }
-        .padding(.vertical, 12)
     }
 
     /// The whole chapter, as on the Mac: tap a line to play from it, hold it for more.
@@ -436,15 +401,5 @@ struct ChapterList: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Done", action: close) }
         }
-    }
-}
-
-extension Color {
-    /// A speaker's colour ("#rrggbb" from the Mac) on a dark page: mixed with white, 72 to 28, as the
-    /// Mac does on its dark pages, so the darker ones stay readable.
-    init?(speaker hex: String?) {
-        guard let hex, hex.hasPrefix("#"), hex.count == 7, let v = Int(hex.dropFirst(), radix: 16) else { return nil }
-        let mix = { (c: Int) in (Double(c & 0xff) / 255) * 0.72 + 0.28 }
-        self.init(red: mix(v >> 16), green: mix(v >> 8), blue: mix(v))
     }
 }

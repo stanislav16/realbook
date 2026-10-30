@@ -304,6 +304,7 @@ struct CoverImage: View {
     let image: UIImage?
     let title: String
     var author = ""
+    var radius: CGFloat = 4
 
     var body: some View {
         Group {
@@ -336,8 +337,8 @@ struct CoverImage: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(.white.opacity(0.08)))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(.white.opacity(0.08)))
     }
 }
 

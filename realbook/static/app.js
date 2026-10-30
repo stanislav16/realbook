@@ -425,7 +425,11 @@ async function openBook(id) {
   $("#library").classList.add("hidden");
   $("#reader").classList.remove("hidden");
   $("#book-title").textContent = book.title;
-  $("#now-cover").replaceChildren(coverEl(book));
+  // The cover at its own shape, so none of it is cropped when it's this big.
+  const cover = coverEl(book), frame = $("#now-cover");
+  frame.style.removeProperty("--ratio");
+  if (cover.tagName === "IMG") cover.onload = () => frame.style.setProperty("--ratio", cover.naturalWidth / cover.naturalHeight);
+  frame.replaceChildren(cover);
   $("#np-title").textContent = book.title;
   const [g1, g2] = COVER_GRADIENTS[hash(book.title) % COVER_GRADIENTS.length];
   $("#np-backdrop").style.backgroundImage = book.cover ? `url("/api/books/${book.id}/cover")` : `linear-gradient(160deg, ${g1}, ${g2})`;
@@ -579,22 +583,6 @@ function highlight(jump = false) {
     node.classList.add("now");
     if (S.following) scrollToLine(node, jump);
   }
-  // The cover view: the line being read, who says it, and the lines either side.
-  const segs = S.chapter?.segments || [];
-  const seg = segs[S.segIdx];
-  const c = seg && seg.kind === "dialogue" ? charById(seg.speaker) : null;
-  const who = $("#now-speaker");
-  who.classList.toggle("hidden", !c);
-  if (c) { who.textContent = c.name; who.style.setProperty("--c", colorOf(c.id)); }
-  const line = $("#np-line"), text = seg ? (c ? `“${seg.text}”` : seg.text) : "";
-  if (line.textContent !== text) {
-    line.textContent = text;
-    line.classList.remove("fade");
-    void line.offsetWidth;
-    line.classList.add("fade");
-  }
-  $("#np-before").textContent = segs[S.segIdx - 1]?.text || "";
-  $("#np-after").textContent = segs[S.segIdx + 1]?.text || "";
   $("#now-chapter").textContent = S.chapter ? [sectionOf(S.chapter), S.chapter.title].filter(Boolean).join(" · ") : "";
   showScrub();
   if ("mediaSession" in navigator && S.chapter) {
@@ -1490,7 +1478,7 @@ $("#add-book").onclick = (e) => { if (window.pywebview?.api) { e.preventDefault(
 $("#back").onclick = showLibrary;
 $("#toc-btn").onclick = () => togglePanel("toc");
 $("#text-btn").onclick = toggleText;
-$("#np-lines").onclick = toggleText;
+$("#now-cover").onclick = toggleText;
 $("#more-btn").onclick = (e) => {
   e.stopPropagation();
   const btn = e.currentTarget;
@@ -1550,7 +1538,7 @@ document.addEventListener("pointerdown", (e) => {
   const t = e.target, inside = (sel) => t.closest?.(sel);
   if (!$("#dialog").open) {
     // A press that closes something on the text only closes it: it doesn't also start that line.
-    S.swallowClick = !!inside("#page, #np-lines") && (!$("#menu").classList.contains("hidden") || !$("#aa-pop").classList.contains("hidden")
+    S.swallowClick = !!inside("#page, #now-cover") && (!$("#menu").classList.contains("hidden") || !$("#aa-pop").classList.contains("hidden")
       || $("#reader").classList.contains("show-toc") || $("#reader").classList.contains("show-cast"));
     if (!inside("#menu") && !S.menuAnchor?.contains(t)) closeMenu();
     if (!inside("#aa-pop") && !inside("#menu") && !inside("#more-btn")) { $("#aa-pop").classList.add("hidden"); $("#more-btn").classList.remove("active"); }

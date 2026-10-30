@@ -100,7 +100,7 @@ def use_kokoro() -> bool:
 
 
 def designed_engine() -> designed.Engine | None:
-    """The designed-voice engine (Qwen3-TTS or Breeze-TTS-2) books are read with, if one is chosen."""
+    """The designed-voice engine (Qwen3-TTS) books are read with, if it's chosen."""
     engine = designed.ENGINES.get(store.settings().get("voice_engine", "kokoro"))
     return engine if engine and designed.installed(engine) else None
 

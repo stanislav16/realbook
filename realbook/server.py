@@ -95,7 +95,7 @@ def config(request: Request = None):
 
 class SettingsUpdate(BaseModel):
     anthropic_api_key: str | None = None
-    voice_engine: str | None = None  # "kokoro" | "apple" | "qwen" | "breeze"
+    voice_engine: str | None = None  # "kokoro" | "apple" | "qwen"
     apple_for_accents: bool | None = None
     appearance: dict | None = None  # reader theme, font, size: kept here because the app's port changes each launch
     hide_voice_banner: bool | None = None

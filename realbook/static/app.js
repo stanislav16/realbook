@@ -880,7 +880,7 @@ function preview(settings, text) {
   new Audio(`/api/preview?${q}`).play().catch(() => {});
 }
 
-const DESIGNED = ["qwen", "breeze"];  // engines that make voices from descriptions
+const DESIGNED = ["qwen"];  // engines that make voices from descriptions
 const isDesigned = (voice) => DESIGNED.some((e) => voice.startsWith(e + ":"));
 const designing = () => DESIGNED.includes(S.config.voice_engine) && S.config[S.config.voice_engine]?.installed;
 
@@ -1267,7 +1267,6 @@ async function openSettings() {
     voiceSection.append(el("div", { class: "engine-offer" },
       el("strong", {}, d.label.replace("Designed voices ", "").replace(/[()]/g, "")),
       el("p", { class: "muted small" }, `${d.speed} One-time download of ${(d.bytes / 1e9).toFixed(1)} GB.`),
-      d.licence ? el("p", { class: "small" }, d.licence) : null,
       el("button", { class: "button small", type: "button", disabled: d.state === "downloading", onclick: async (e) => {
         e.currentTarget.disabled = true;
         await startInstall(name);
@@ -1425,7 +1424,7 @@ function openModelFinder() {
   load();
 }
 
-// `which` is "kokoro" (natural voices) or a designed-voice engine ("qwen", "breeze").
+// `which` is "kokoro" (natural voices) or a designed-voice engine ("qwen").
 async function startInstall(which) {
   try {
     S.config[which] = await api(`/api/${which}/install`, { method: "POST" });

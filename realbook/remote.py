@@ -21,7 +21,7 @@ COOKIE = "realbook_key"
 HEADER = "x-realbook-key"  # how the iPhone app sends the key
 # Things only someone sitting at the Mac may do.
 BLOCKED = [("PUT", "/api/settings"), ("POST", "/api/open-link"), ("POST", "/api/open-voice-settings"),
-           ("POST", "/api/kokoro/install"), ("POST", "/api/qwen/install"), ("POST", "/api/breeze/install"), ("POST", "/api/remote"),
+           ("POST", "/api/kokoro/install"), ("POST", "/api/qwen/install"), ("POST", "/api/remote"),
            ("POST", "/api/remote/reset")]
 
 _server = None

@@ -6,7 +6,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).parent
-VERSION = "0.9.35"
+VERSION = "0.9.36"
 MAC = sys.platform == "darwin"
 
 datas = [
@@ -24,7 +24,7 @@ if MAC:
     datas += collect_data_files("mlx", includes=["**/*.metallib"]) + collect_data_files("mlx_audio")
     binaries += collect_dynamic_libs("mlx")
     # mlx-audio imports its model code by name once it has read the model's config.
-    hiddenimports += (collect_submodules("mlx") + collect_submodules("mlx_audio.tts.models.qwen3_tts") + collect_submodules("mlx_audio.tts.models.breeze_tts")
+    hiddenimports += (collect_submodules("mlx") + collect_submodules("mlx_audio.tts.models.qwen3_tts")
                       + collect_submodules("mlx_audio.codec")
                       + ["mlx_audio.tts.utils", "miniaudio", "transformers.models.qwen2.tokenization_qwen2"]
                       # The local AI that describes characters (mlx-lm loads model code by name too).

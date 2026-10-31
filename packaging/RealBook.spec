@@ -1,5 +1,5 @@
 # PyInstaller spec for RealBook. Build with ./packaging/build_app.sh (Mac: RealBook.app)
-# or `uv run pyinstaller packaging/RealBook.spec` on Windows (dist/RealBook/RealBook.exe).
+# or `uv run pyinstaller packaging/RealBook.spec` on Windows or Linux (dist/RealBook/RealBook[.exe]).
 import sys
 from pathlib import Path
 
@@ -29,6 +29,11 @@ if MAC:
                       + ["mlx_audio.tts.utils", "miniaudio", "transformers.models.qwen2.tokenization_qwen2"]
                       # The local AI that describes characters (mlx-lm loads model code by name too).
                       + collect_submodules("mlx_lm"))
+
+if sys.platform.startswith("linux"):
+    # The window: pywebview reaches Qt through QtPy, by name.
+    hiddenimports += ["qtpy", "webview.platforms.qt", "PyQt6.QtWebEngineWidgets", "PyQt6.QtWebEngineCore", "PyQt6.QtWebChannel",
+                      "PyQt6.QtNetwork", "PyQt6.QtPrintSupport"]
 
 a = Analysis(
     [str(ROOT / "packaging" / "launch.py")],

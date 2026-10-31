@@ -14,6 +14,9 @@ dependencies = [
     "qrcode>=8.2",
     "mlx-lm>=0.32.2 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
     "zeroconf>=0.152.0",
+    "pyqt6>=6.7 ; sys_platform == 'linux'",  # the window on Linux
+    "pyqt6-webengine>=6.7 ; sys_platform == 'linux'",
+    "qtpy>=2.4 ; sys_platform == 'linux'",
 ]
 
 [project.scripts]

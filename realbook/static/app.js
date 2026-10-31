@@ -278,7 +278,7 @@ async function renderPhone() {
     : ahead.state === "error" ? `Couldn't make some lines of “${ahead.title}”. It tries again the next time your iPhone connects.`
     : ahead.title ? `The next hours of “${ahead.title}” are ready: ${ahead.total} lines.`
     : "Starts by itself when you open RealBook on your iPhone.";
-  const away = el("section", { class: "phone-card" }, el("h4", {}, "Listening away from this Mac"),
+  const away = el("section", { class: "phone-card" }, el("h4", {}, "Listening away from this computer"),
     el("p", { class: "muted small" }, "Your iPhone saves the next 4 hours of the book you're listening to, whenever it can reach this Mac, so you can leave without an offline copy. When a voice or a line changes, only that line is made and saved again."),
     el("div", { class: "phone-row" }, el("div", { class: "phone-info" }, el("span", { class: "muted small" }, aheadNote)),
       el("button", { class: "button small", type: "button", onclick: async () => {
@@ -1284,7 +1284,7 @@ async function openSettings() {
         el("select", { name: "voice_engine" },
           k.installed ? el("option", { value: "kokoro", selected: c.voice_engine === "kokoro" }, "Natural voices (Kokoro)") : null,
           ...designedEngines.filter(([, d]) => d.installed).map(([name, d]) => el("option", { value: name, selected: c.voice_engine === name }, d.label)),
-          el("option", { value: "apple", selected: c.voice_engine === "apple" }, c.platform === "mac" ? "Mac system voices" : "Windows voices"))),
+          el("option", { value: "apple", selected: c.voice_engine === "apple" }, c.platform === "mac" ? "Mac system voices" : c.platform === "windows" ? "Windows voices" : "System voices (espeak-ng)"))),
       k.installed ? el("label", { class: "check" }, el("input", { type: "checkbox", name: "apple_for_accents", checked: c.apple_for_accents }),
         el("span", {}, "With natural voices, use Mac voices for Scottish, Irish, Indian, Australian and South African characters, when one with that accent is installed (natural voices only do American and British)")) : null,
       el("p", { class: "muted small" }, "Changing these re-casts every book. Voices you picked by hand are kept."),
@@ -1307,8 +1307,8 @@ async function openSettings() {
       dStatus));
     if (d.state === "downloading" || d.state === "error") watchInstall(dStatus, name);
   }
-  voiceSection.append(
-    el("button", { class: "button small", type: "button", onclick: () => openModelFinder() }, "Find Voice Models…"),
+  voiceSection.append(el("button", { class: "button small", type: "button", onclick: () => openModelFinder() }, "Find Voice Models…"));
+  if (c.platform !== "linux") voiceSection.append(
     el("p", { class: "muted small" }, c.platform === "mac" ? "More Mac voices: VoiceOver Utility → Speech → Voice → Customize. Pick Premium or Enhanced versions."
       : "More Windows voices: Settings → Time & language → Speech → Add voices."),
     el("button", { class: "button small", type: "button", onclick: () => api("/api/open-voice-settings", { method: "POST" }).catch((e) => toast(e.message)) },
@@ -1572,7 +1572,16 @@ S.audio.addEventListener("waiting", () => $("#play").classList.add("loading"));
 S.audio.addEventListener("playing", () => $("#play").classList.remove("loading"));
 S.audio.addEventListener("pause", () => $("#play").classList.remove("loading"));
 S.audio.onended = onEnded;
-S.audio.onerror = () => { if (S.playing) { toast("Couldn't make audio for this line; skipping it"); onEnded(); } };
+S.audio.onerror = () => {
+  if (!S.playing) return;
+  if (!S.config.system_voices && !S.config.kokoro?.installed) {  // Linux, before any voices are downloaded
+    pause();
+    toast("Download the natural voices first, to hear your books.", 6000);
+    return openSettings();
+  }
+  toast("Couldn't make audio for this line; skipping it");
+  onEnded();
+};
 $("#cast-search").addEventListener("input", () => renderCast());
 // Pressing anywhere else closes what's open: menus, the Aa popover, and the Chapters and Cast
 // panels. Watched on the way down, so a button that handles its own click can't hide it. A menu's

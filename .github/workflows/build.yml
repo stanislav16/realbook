@@ -1,0 +1,152 @@
+# Builds RealBook for Windows and Linux, checks that each reads, speaks and opens its window, and
+# attaches them to releases.
+name: Windows and Linux builds
+
+on:
+  push:
+    branches: [main, ci-builds]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to attach the builds to (leave empty to only build)
+        required: false
+
+permissions:
+  contents: write  # to attach the builds to a release
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Self-test from source (import a book, speak with a Windows voice)
+        run: uv run realbook-selftest
+
+      - name: Build
+        run: uv run pyinstaller --noconfirm --clean --distpath dist --workpath build packaging/RealBook.spec
+
+      - name: Self-test the built app (Windows voice and Kokoro)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/RealBook/RealBook.exe -ArgumentList '--selftest','--kokoro','--log','selftest.log' -Wait -PassThru
+          Get-Content selftest.log
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Open the window and take a picture of it
+        shell: pwsh
+        env:
+          REALBOOK_DATA: ${{ runner.temp }}\realbook-window
+        run: |
+          $p = Start-Process dist/RealBook/RealBook.exe -PassThru
+          Start-Sleep -Seconds 40
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $picture = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          [System.Drawing.Graphics]::FromImage($picture).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $picture.Save("window-windows.png")
+          if ($p.HasExited) { Write-Error "RealBook closed by itself with code $($p.ExitCode)"; exit 1 }
+          Stop-Process -Id $p.Id -Force
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/RealBook -DestinationPath RealBook-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealBook-windows
+          path: RealBook-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window-windows
+          path: window-windows.png
+          if-no-files-found: ignore
+
+      - name: Attach to the release
+        if: github.event_name == 'release' || inputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload $env:TAG RealBook-windows.zip --clobber
+
+  linux:
+    runs-on: ubuntu-22.04  # the oldest system it's built on is the oldest it runs on
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: |
+          sudo apt-get update
+          # What the window needs (bundled into the build), and a screen to try it on
+          sudo apt-get install -y libegl1 libgl1 libnss3 libasound2 libdbus-1-3 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcomposite1 \
+            libxdamage1 libxrandr2 libxtst6 xvfb imagemagick
+          uv sync --locked
+
+      - name: Self-test from source (a computer with no voices at all)
+        run: uv run realbook-selftest
+
+      - name: Build
+        run: uv run pyinstaller --noconfirm --clean --distpath dist --workpath build packaging/RealBook.spec
+
+      - name: Self-test the built app (Kokoro)
+        run: |
+          dist/RealBook/RealBook --selftest --kokoro --log selftest.log || { cat selftest.log; exit 1; }
+          cat selftest.log
+
+      - name: Self-test with a system voice
+        run: |
+          sudo apt-get install -y espeak-ng
+          dist/RealBook/RealBook --selftest --log selftest.log || { cat selftest.log; exit 1; }
+          cat selftest.log
+
+      - name: Open the window and take a picture of it
+        run: |
+          export REALBOOK_DATA="$RUNNER_TEMP/realbook-window"
+          xvfb-run -a -s "-screen 0 1320x880x24" bash -c '
+            dist/RealBook/RealBook > window.log 2>&1 &
+            app=$!
+            sleep 40
+            import -window root window-linux.png
+            kill -0 $app || { echo "RealBook closed by itself"; cat window.log; exit 1; }
+            kill $app
+            cat window.log'
+
+      - name: Pack
+        run: tar -czf RealBook-linux.tar.gz -C dist RealBook
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealBook-linux
+          path: RealBook-linux.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window-linux
+          path: window-linux.png
+          if-no-files-found: ignore
+
+      - name: Attach to the release
+        if: github.event_name == 'release' || inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" RealBook-linux.tar.gz --clobber

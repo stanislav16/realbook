@@ -88,7 +88,8 @@ def config(request: Request = None):
         "hide_voice_banner": values.get("hide_voice_banner", False),
         # On another device, the UI hides what only works on the Mac.
         "remote": bool(request and request.client and not remote.is_local(request.client.host)),
-        "platform": "mac" if system.MAC else "windows" if system.WINDOWS else "other",
+        "platform": "mac" if system.MAC else "windows" if system.WINDOWS else "linux",
+        "system_voices": bool(voices.installed_voices()),
         "export": system.CAN_EXPORT,
     }
 
@@ -496,7 +497,8 @@ def read_again(book_id: str, n: int, sid: int):
         raise HTTPException(404, "Segment not found")
     seg = ch["segments"][sid]
     if not tts.can_vary(store.voice_for(b, seg)["voice"]):
-        raise HTTPException(400, "This voice reads a line the same way every time. Give the character a designed voice to hear it differently.")
+        raise HTTPException(400, "This voice reads a line the same way every time."
+                            + (" Give the character a designed voice to hear it differently." if system.MAC else ""))
     with store.lock(book_id):
         old = lines.path(b, ch["segments"], seg)
         seg["take"] = seg.get("take", 0) + 1

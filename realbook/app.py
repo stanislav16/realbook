@@ -1,8 +1,9 @@
-"""RealBook as a desktop app (Mac or Windows): the reader in a native window, with the server running inside the app."""
+"""RealBook as a desktop app (Mac, Windows or Linux): the reader in a native window, with the server running inside the app."""
 
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import threading
@@ -202,17 +203,30 @@ def main() -> None:
     # Only bare toolbar/sidebar background drags the window, not the buttons on it.
     webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
     _install_menu_shortcuts()
+    url = f"http://127.0.0.1:{port}"
+    if system.LINUX:
+        os.environ.setdefault("QT_API", "pyqt6")
+        # The window only ever shows this app's own page, and many systems don't allow its sandbox.
+        os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
     shell = Shell()
     shell.window = webview.create_window(
         "RealBook",
-        f"http://127.0.0.1:{port}/?native={'mac' if system.MAC else 'windows'}",
+        f"{url}/?native={'mac' if system.MAC else 'windows'}",  # "windows": a window with its own menu bar
         width=1320,
         height=880,
         min_size=(860, 600),
         background_color="#000000" if _dark_mode() else "#FFFFFF",  # no white flash while the page loads
         js_api=Api(shell),
     )
-    webview.start(shell.style_native if system.MAC else None, menu=shell.menu())
+    try:
+        webview.start(shell.style_native if system.MAC else None, menu=shell.menu(), gui="qt" if system.LINUX else None)
+    except Exception:
+        if not system.LINUX:
+            raise
+        # No way to open a window here: the browser works just as well.
+        system.open_url(url)
+        print(f"RealBook is running at {url}  (Ctrl+C to stop)")
+        threading.Event().wait()
     srv.should_exit = True
 
 

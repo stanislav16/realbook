@@ -1,8 +1,9 @@
-"""What differs between macOS and Windows: where data lives, system voices, audio files, opening things.
+"""What differs between macOS, Windows and Linux: where data lives, system voices, audio files, opening things.
 
 On a Mac, lines are cached as AAC (.m4a) made with afconvert and system voices come from `say`.
 On Windows, lines are cached as .wav and system voices come from System.Speech (SAPI), driven
-through PowerShell so no extra packages are needed.
+through PowerShell so no extra packages are needed. On Linux, lines are cached as .wav and system
+voices come from espeak-ng, if it's installed; most people will use Kokoro.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from xml.sax.saxutils import escape
 
 MAC = sys.platform == "darwin"
 WINDOWS = sys.platform == "win32"
+LINUX = sys.platform.startswith("linux")
 AUDIO_EXT = ".m4a" if MAC else ".wav"
 AUDIO_TYPE = "audio/mp4" if MAC else "audio/wav"
 CAN_EXPORT = MAC  # audiobook export encodes AAC with afconvert
@@ -88,7 +90,7 @@ def system_voices() -> list[dict]:
     if MAC:
         return []  # parsed from `say -v ?` in voices.py, which also knows Apple's voice names
     if not WINDOWS:
-        return []
+        return _espeak_voices()
     script = (
         "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
         "@($s.GetInstalledVoices() | Where-Object Enabled | ForEach-Object { $v = $_.VoiceInfo; "
@@ -106,6 +108,25 @@ def system_voices() -> list[dict]:
     return [{"name": v["name"], "locale": (v.get("culture") or "en-US").replace("-", "_"),
              "gender": (v.get("gender") or "").lower() if v.get("gender") in ("Male", "Female") else "unknown",
              "age": ages.get(v.get("age"), "adult")} for v in data]
+
+
+def _espeak() -> str | None:
+    return shutil.which("espeak-ng") or shutil.which("espeak")
+
+
+def _espeak_voices() -> list[dict]:
+    """The English voices of `espeak-ng --voices=en`: priority, language, age/gender, name, file."""
+    if not (espeak := _espeak()):
+        return []
+    out = run([espeak, "--voices=en"], capture_output=True, text=True, timeout=20).stdout
+    voices = []
+    for line in out.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 4:
+            sex = parts[2].rsplit("/", 1)[-1]
+            voices.append({"name": parts[1], "locale": parts[1].replace("-", "_"),
+                           "gender": {"M": "male", "F": "female"}.get(sex, "unknown"), "age": "adult"})
+    return voices
 
 
 _SAPI = (
@@ -126,7 +147,11 @@ def speak(text: str, voice: str, rate: int, pitch_shift: int, out: Path) -> None
         encode(wav, out, 22050)
         return
     if not WINDOWS:
-        raise RuntimeError("System voices aren't available on this computer; download natural voices in Settings")
+        if not (espeak := _espeak()):
+            raise RuntimeError("System voices aren't available on this computer; download natural voices in Settings")
+        run([espeak, "-v", voice, "-s", str(int(rate)), "-p", str(max(0, min(99, 50 + 4 * pitch_shift))), "-w", str(out), "--stdin"],
+            input=text, text=True, check=True, capture_output=True, timeout=120)
+        return
     speed = round((rate / 180 - 1) * 100)  # RealBook's rates are words per minute, 180 being normal
     ssml = (f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">'
             f'<prosody rate="{speed:+d}%" pitch="{2 * pitch_shift:+d}%">{escape(text)}</prosody></speak>')

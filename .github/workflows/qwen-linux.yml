@@ -1,0 +1,45 @@
+# Tries designed voices through PyTorch on Linux from start to finish. There's no graphics card here,
+# so this checks the install and that it reads, on the processor; speed needs a real card.
+name: Linux designed voices
+
+on:
+  push:
+    branches: [qwen-linux]
+  workflow_dispatch:
+
+jobs:
+  try:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libnss3 libasound2 libdbus-1-3 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcomposite1 \
+            libxdamage1 libxrandr2 libxtst6
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android  # room for the voices
+          df -h /
+          uv sync --locked
+      - name: Build the app
+        run: uv run pyinstaller --noconfirm --clean --distpath dist --workpath build packaging/RealBook.spec
+      - name: Pack
+        run: tar -czf RealBook-linux.tar.gz -C dist RealBook
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealBook-linux-test
+          path: RealBook-linux.tar.gz
+          retention-days: 14
+      - name: Install PyTorch and the models, make a voice and read lines
+        env:
+          REALBOOK_QWEN_PC: "1"
+          REALBOOK_QWEN_DEVICE: cpu
+          REALBOOK_DATA: ${{ runner.temp }}/realbook
+        run: uv run python packaging/test_qwen_pc.py --no-gpu
+      - name: What the voice software said
+        if: always()
+        run: tail -40 "$RUNNER_TEMP/realbook/models/qwen/runtime/worker.log" || true

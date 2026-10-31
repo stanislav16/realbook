@@ -30,7 +30,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import store, system
+from . import qwen_pc, store, system
 
 HF = "https://huggingface.co"
 SAMPLE_RATE = 24000
@@ -92,6 +92,7 @@ class Engine:
     read: Callable  # (model, text, reference clip, what the clip says) -> generator of audio chunks
     read_many: Callable  # (model, texts, reference clip, what the clip says) -> generator of numbered audio chunks
     speed_note: str = ""
+    extra_bytes: int = 0  # to install besides the models, shown as part of the download
     design_version: int = 1  # bump when design settings change, so voices are designed again
     styles: tuple[str, ...] = ("quiet",)  # ways of speaking it can do (see STYLES)
     fingerprint: bool = False  # cloning takes a separate speaker fingerprint (Style.keep_voice)
@@ -104,12 +105,30 @@ class Engine:
 
     @property
     def download_bytes(self) -> int:
+        return self.model_bytes + self.extra_bytes
+
+    @property
+    def model_bytes(self) -> int:
         return sum({sha: size for *_, size, sha in self.files()}.values())  # identical files are fetched once
 
 
+# The same voices on Linux, from Qwen's own release of the same models (see qwen_pc.py).
+_QWEN_PC_MODELS = {
+    "designer": ("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", "5ecdb67327fd37bb2e042aab12ff7391903235d3", {
+        "model.safetensors": (3833402552, "391e8db219f292c515297cdceeb43e4eae67cdde35fa57e79a6a8a532fca0522"),
+        "config.json": (4421, "aecd2cc4c1fe9edef1cb7ca7c401685a43879ad43f3f9e883f1c6760b61731e0"),
+        **_QWEN_SHARED,
+    }),
+    "reader": ("Qwen/Qwen3-TTS-12Hz-0.6B-Base", "5d83992436eae1d760afd27aff78a71d676296fc", {
+        "model.safetensors": (1829344272, "180b3b10eb1c9f1b4db7806d5475bae3071c0243c299d49926bab1da3b6946f6"),
+        "config.json": (4494, "2e714c787c8edb98b05432685cddb634add2de4d4e645f653d68251ef72ba011"),
+        **_QWEN_SHARED,
+    }),
+}
+
 QWEN = Engine(
     name="qwen", label="Designed voices (Qwen3-TTS)",
-    models={
+    models=_QWEN_PC_MODELS if qwen_pc.ENABLED else {
         "designer": ("mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16", "7d3824abff87e49756bb0f83fb5411de75d160c4", {
             "model.safetensors": (3833402589, "96ae28bec2205ec0b5e0c750bea2b8a5deac4f14d33a8a25a5f753299486b70e"),
             "model.safetensors.index.json": (32458, "abf019e063dcc595d7aef7c9554d2806ffdc58746a7ac6238cb26177af8d431f"),
@@ -130,7 +149,8 @@ QWEN = Engine(
     design_version=3,  # 2: an expressive sample; 3: a moderate one
     styles=("quiet", "loud", "upset"),
     fingerprint=True,
-    speed_note="About twice as fast as listening on a recent Mac.",
+    speed_note="For your NVIDIA graphics card." if qwen_pc.ENABLED else "About twice as fast as listening on a recent Mac.",
+    extra_bytes=qwen_pc.RUNTIME_BYTES if qwen_pc.ENABLED else 0,
 )
 
 ENGINES = {e.name: e for e in (QWEN,)}
@@ -139,6 +159,11 @@ _mlx_loads: bool | None = None
 
 
 def supported() -> bool:
+    """Whether this computer can run designed voices."""
+    return qwen_pc.supported() if qwen_pc.ENABLED else mlx_supported()
+
+
+def mlx_supported() -> bool:
     """Apple silicon, with a macOS new enough for the bundled MLX runtime to load."""
     global _mlx_loads
     if platform.system() != "Darwin" or platform.machine() != "arm64":
@@ -165,7 +190,12 @@ def voices_dir(engine: Engine) -> Path:
 
 
 def installed(engine: Engine) -> bool:
-    return supported() and all((model_dir(engine) / role / name).exists() for role, _, _, name, _, _ in engine.files())
+    return (supported() and all((model_dir(engine) / role / name).exists() for role, _, _, name, _, _ in engine.files())
+            and (not qwen_pc.ENABLED or qwen_pc.ready(_runtime(engine))))
+
+
+def _runtime(engine: Engine) -> Path:
+    return model_dir(engine) / "runtime"
 
 
 # ------------------------------------------------------------------ download
@@ -188,10 +218,12 @@ def install_async(engine: Engine, on_done=None) -> dict:
 
 
 def _download(engine: Engine, on_done) -> None:
-    status, total = engine.install, engine.download_bytes
+    status, total = engine.install, engine.model_bytes
     done_bytes = 0
     have: dict[str, Path] = {}  # sha256 -> a finished file, to link instead of downloading twice
     try:
+        if qwen_pc.ENABLED:
+            qwen_pc.install(_runtime(engine), status)
         for role, repo, rev, name, size, sha in engine.files():
             target = model_dir(engine) / role / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -390,9 +422,10 @@ def _submit(priority: int, fn, *args) -> Future:
 
 
 def _work() -> None:
-    import mlx.core as mx
+    if not qwen_pc.ENABLED:
+        import mlx.core as mx
 
-    mx.set_cache_limit(MLX_CACHE_LIMIT)
+        mx.set_cache_limit(MLX_CACHE_LIMIT)
     while True:
         try:
             _, _, fn, args, fut = _queue.get(timeout=30)
@@ -409,6 +442,9 @@ def _work() -> None:
 
 def _model(engine: Engine, role: str):
     if (engine.name, role) not in _models:
+        if qwen_pc.ENABLED:
+            _models[engine.name, role] = qwen_pc.Model(_runtime(engine), role, model_dir(engine) / role)
+            return _models[engine.name, role]
         from mlx_audio.tts.utils import load_model
 
         # Only one engine's models stay in memory at a time.
@@ -423,7 +459,10 @@ def _unload_idle() -> None:
     if time.monotonic() - _last_design < DESIGNER_IDLE_SECONDS:
         return
     idle = [k for k in _models if k[1] == ENGINES[k[0]].design_role != ENGINES[k[0]].read_role]
-    if idle:
+    if idle and qwen_pc.ENABLED:
+        for k in idle:
+            _models.pop(k).unload()
+    elif idle:
         import mlx.core as mx
 
         for k in idle:
@@ -432,9 +471,11 @@ def _unload_idle() -> None:
 
 
 def _generate(gen) -> np.ndarray:
+    parts = [r.audio for r in gen]
+    if qwen_pc.ENABLED:
+        return np.clip(np.concatenate(parts), -1, 1)
     import mlx.core as mx
 
-    parts = [r.audio for r in gen]
     audio = mx.concatenate(parts) if len(parts) > 1 else parts[0]
     mx.eval(audio)
     return np.clip(np.array(audio, dtype=np.float32).ravel(), -1, 1)
@@ -621,10 +662,13 @@ def _design_style(engine: Engine, key: str, style: str) -> Path:
 
 def _likeness(engine: Engine, a: np.ndarray, b: np.ndarray) -> float:
     """How alike two clips' speakers are, by the reading model's speaker fingerprint (1 = the same)."""
-    import mlx.core as mx
-
     model = _model(engine, engine.read_role)
-    x, y = (np.array(model.extract_speaker_embedding(mx.array(c))).ravel() for c in (a, b))
+    if qwen_pc.ENABLED:
+        x, y = model.speaker_embedding(a), model.speaker_embedding(b)
+    else:
+        import mlx.core as mx
+
+        x, y = (np.array(model.extract_speaker_embedding(mx.array(c))).ravel() for c in (a, b))
     return float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y) + 1e-9))
 
 
@@ -675,6 +719,8 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
     def generate() -> np.ndarray:
         if not styled:
             return _generate(engine.read(model, text, ref, ref_text))
+        if qwen_pc.ENABLED:
+            return _generate(model.generate(text=text, ref_audio=str(ref), ref_text=ref_text, speaker_from=str(usual)))
         import mlx.core as mx
 
         fingerprint = model.extract_speaker_embedding

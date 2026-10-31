@@ -209,6 +209,10 @@ def keep_awake(seconds: int = 600) -> None:
         _awake = popen(["caffeinate", "-i", "-t", str(seconds)])
     elif WINDOWS:
         threading.Thread(target=_windows_awake, daemon=True).start()
+    elif shutil.which("systemd-inhibit"):
+        if _awake is not None and _awake.poll() is None:
+            _awake.terminate()
+        _awake = popen(["systemd-inhibit", "--what=idle:sleep", "--who=RealBook", "--why=Making audio", "sleep", str(seconds)])
 
 
 def _windows_awake() -> None:

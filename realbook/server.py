@@ -521,7 +521,7 @@ def analyze(book_id: str, req: AnalyzeRequest):
         raise HTTPException(409, "Already analysing this book")
     if req.engine == "claude" and not claude_analyzer.available():
         raise HTTPException(400, "Add an Anthropic API key in Settings to use Claude")
-    if req.engine in ("local", "local-speakers") and not designed.supported():
+    if req.engine in ("local", "local-speakers") and not designed.mlx_supported():
         raise HTTPException(400, "The local AI needs a Mac with Apple silicon")
 
     if req.engine == "local-speakers":

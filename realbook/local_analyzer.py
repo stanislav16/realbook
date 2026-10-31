@@ -67,11 +67,11 @@ def model_dir(m: Model = MODEL) -> Path:
 
 
 def installed(m: Model = MODEL) -> bool:
-    return designed.supported() and all((model_dir(m) / f).exists() for f in m.files)
+    return designed.mlx_supported() and all((model_dir(m) / f).exists() for f in m.files)
 
 
 def status() -> dict:
-    return {"supported": designed.supported(), "installed": installed(), "bytes": MODEL.download_bytes, "label": MODEL.label}
+    return {"supported": designed.mlx_supported(), "installed": installed(), "bytes": MODEL.download_bytes, "label": MODEL.label}
 
 
 def install(progress: Callable[[str], None]) -> None:

@@ -6,12 +6,14 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).parent
-VERSION = "0.9.41"
+VERSION = "0.9.42"
 MAC = sys.platform == "darwin"
 
 datas = [
     (str(ROOT / "realbook" / "static"), "realbook/static"),
     (str(ROOT / "realbook" / "samples"), "realbook/samples"),
+    (str(ROOT / "realbook" / "qwen_worker.py"), "realbook"),
+    (str(ROOT / "realbook" / "qwen_pc_requirements.txt"), "realbook"),
     # Kokoro: tokenizer config, and espeak-ng's pronunciation data
     *collect_data_files("kokoro_onnx"),
     *collect_data_files("espeakng_loader"),

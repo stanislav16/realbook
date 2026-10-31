@@ -635,10 +635,19 @@ final class Player {
         return macBook?.colors[id] ?? timeline?.colors?[id]
     }
 
-    /// How much of what's next is on this iPhone, when listening without an offline copy.
-    var savedNote: String? {
-        guard mode == .live, let bookID else { return nil }
-        return library?.kept.note(chapter: chapter, segment: segment, of: bookID)
+    /// How long what's next and saved on this iPhone lasts, at this speed, when listening without an
+    /// offline copy. Nil when nothing has been planned for this book yet.
+    var savedMinutes: Int? {
+        guard mode == .live, let bookID, let kept = library?.kept, kept.has(bookID) else { return nil }
+        _ = kept.saved
+        return Kept.minutes(words: kept.wordsAhead(chapter: chapter, segment: segment, of: bookID), speed: speed)
+    }
+
+    /// The same for everything planned, saved yet or not.
+    var plannedMinutes: Int {
+        guard let bookID, let kept = library?.kept else { return 0 }
+        _ = kept.saved
+        return Kept.minutes(words: kept.wordsPlanned(chapter: chapter, segment: segment, of: bookID), speed: speed)
     }
 
     /// Changing who says a line needs the Mac.

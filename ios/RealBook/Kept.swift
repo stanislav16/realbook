@@ -87,6 +87,8 @@ final class Kept {
         struct Making: Codable {
             var state: String
             var enabled: Bool?
+            var done: Int?
+            var total: Int?
         }
 
         var lines: [Line]
@@ -110,6 +112,8 @@ final class Kept {
 
     /// Bumps as lines are saved, for what's shown about them.
     private(set) var saved = 0
+    /// The book whose lines are being saved right now.
+    private(set) var saving: String?
     @ObservationIgnored private var manifests: [String: Manifest] = [:]
     @ObservationIgnored private var keys: [String: [String: String]] = [:]  // book -> "chapter:segment" -> key
     @ObservationIgnored private var have: [String: Set<String>] = [:]
@@ -181,16 +185,40 @@ final class Kept {
         return words
     }
 
+    /// Everything planned from here, saved yet or not.
+    func wordsPlanned(chapter: Int, segment: Int, of id: String) -> Int {
+        (manifest(id)?.lines ?? []).reduce(0) { $0 + ($1.chapter > chapter || ($1.chapter == chapter && $1.segment >= segment) ? $1.words : 0) }
+    }
+
+    func making(_ id: String) -> Manifest.Making? {
+        _ = saved
+        return manifest(id)?.making
+    }
+
+    /// The space the saved lines take.
+    func bytes(of id: String) -> Int64 {
+        let names = (try? FileManager.default.contentsOfDirectory(at: Self.linesFolder(id), includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        return names.reduce(0) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+    }
+
+    /// About how long these words take to hear at this speed.
+    static func minutes(words: Int, speed: Float = 1) -> Int { Int(Float(words) / 155 / max(speed, 0.1)) }
+
+    static func duration(minutes: Int) -> String {
+        minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
+    }
+
     func note(chapter: Int, segment: Int, of id: String) -> String? {
         _ = saved
-        let minutes = wordsAhead(chapter: chapter, segment: segment, of: id) / 155
-        guard minutes > 0 else { return nil }
-        return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min saved" : "\(minutes) min saved"
+        let minutes = Self.minutes(words: wordsAhead(chapter: chapter, segment: segment, of: id))
+        return minutes > 0 ? "\(Self.duration(minutes: minutes)) saved" : nil
     }
 
     /// Takes the Mac's plan and saves what's ready of it, the next line first. Returns when all of it
     /// that's ready is here.
     func update(_ id: String, _ m: Manifest, from mac: MacClient) async throws {
+        saving = id
+        defer { saving = nil }
         let folder = Self.folder(id)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try JSONEncoder().encode(m).write(to: folder.appendingPathComponent("manifest.json"), options: .atomic)

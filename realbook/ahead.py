@@ -86,6 +86,7 @@ def want(book_id: str) -> None:
     with _lock:
         _wanted = book_id
         if _thread is None:
+            _state["state"] = "making"  # it says so itself if there's nothing to do; the iPhone asks again soon
             _thread = threading.Thread(target=_run, daemon=True, name="keep-ahead")
             _thread.start()
 

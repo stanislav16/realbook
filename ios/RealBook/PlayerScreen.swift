@@ -16,6 +16,7 @@ struct PlayerScreen: View {
     @State private var following = true
     @State private var followAgain: Task<Void, Never>?
     @State private var sheet: Sheet?
+    @State private var showSaved = false
 
     enum Sheet: Identifiable {
         case chapters, look, cast, who(Int)
@@ -115,12 +116,12 @@ struct PlayerScreen: View {
             Menu {
                 Button("Read This Line Again", systemImage: "arrow.counterclockwise") { Task { await player.readAgain() } }
                     .disabled(!player.canChangeSpeakers)
+                if player.mode == .live {
+                    Button("Offline Listening", systemImage: "iphone") { showSaved = true }
+                }
                 Divider()
                 Button("Cast", systemImage: "person.2") { sheet = .cast }
                 Button("Text Size & Theme", systemImage: "textformat.size") { sheet = .look }
-                if let saved = player.savedNote {
-                    Section("\(saved) on this iPhone") {}
-                }
             } label: {
                 Image(systemName: "ellipsis").font(.body.weight(.semibold))
                     .frame(width: 36, height: 36).background(ink.opacity(0.12), in: Circle())
@@ -142,12 +143,25 @@ struct PlayerScreen: View {
             .frame(maxWidth: 240)
         } else {
             let away = player.mode == .live && !library.reachable
-            Label(away ? "Saved on this iPhone" : player.mode == .live ? "Live from your Mac" : "Offline copy",
-                  systemImage: away ? "iphone" : player.mode == .live ? "dot.radiowaves.left.and.right" : "arrow.down.circle")
-                .font(.caption.weight(.semibold)).textCase(.uppercase)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(ink.opacity(0.12), in: Capsule())
+            // What's saved shows here, and tapping it says more.
+            Button { showSaved = true } label: {
+                Label(modeLabel(away: away), systemImage: away ? "iphone" : player.mode == .live ? "dot.radiowaves.left.and.right" : "arrow.down.circle")
+                    .font(.caption.weight(.semibold)).textCase(.uppercase)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(ink.opacity(0.12), in: Capsule())
+            }
+            .disabled(player.mode != .live)
+            .popover(isPresented: $showSaved) {
+                OfflineTime().presentationCompactAdaptation(.popover)
+            }
         }
+    }
+
+    private func modeLabel(away: Bool) -> String {
+        guard player.mode == .live else { return "Offline copy" }
+        guard let minutes = player.savedMinutes, minutes > 0 else { return away ? "Saved on this iPhone" : "Live from your Mac" }
+        return away ? "\(Kept.duration(minutes: minutes)) left offline" : "Live · \(Kept.duration(minutes: minutes)) saved"
     }
 
     // MARK: - middle
@@ -367,6 +381,7 @@ struct PlayerScreen: View {
         case "look": sheet = .look
         case "chapters": sheet = .chapters
         case "who": sheet = .who(player.page.first { $0.dialogue }?.segment ?? 0)
+        case "saved": showSaved = true
         default: break
         }
         for step in (UserDefaults.standard.string(forKey: "script") ?? "").split(separator: ",").map({ $0.split(separator: " ") }) {

@@ -208,3 +208,50 @@ struct SpeakerPicker: View {
         }
     }
 }
+
+/// How long this book can be listened to without the Mac, shown from the player's top bar.
+struct OfflineTime: View {
+    @Environment(Library.self) private var library
+    @Environment(Player.self) private var player
+    @State private var bytes: Int64 = 0
+
+    var body: some View {
+        let minutes = player.savedMinutes ?? 0
+        let planned = max(minutes, player.plannedMinutes)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("OFFLINE LISTENING").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
+            Text(Kept.duration(minutes: minutes)).font(.system(.title, design: .rounded).weight(.semibold)).monospacedDigit()
+            Text(player.speed == 1 ? "saved ahead on this iPhone" : "saved ahead on this iPhone, at \(PlayerScreen.speedLabel(player.speed))")
+                .font(.footnote).foregroundStyle(.secondary)
+            if planned > 0 {
+                ProgressView(value: Double(minutes), total: Double(planned))
+                Text("of \(Kept.duration(minutes: planned)) to be saved").font(.caption).foregroundStyle(.secondary)
+            }
+            Divider()
+            Label(state, systemImage: library.reachable ? "laptopcomputer" : "laptopcomputer.slash")
+                .font(.footnote).fixedSize(horizontal: false, vertical: true)
+            if bytes > 0 {
+                Label(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) + " on this iPhone", systemImage: "internaldrive")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(width: 280, alignment: .leading)
+        .task(id: minutes) {
+            if let id = player.bookID { bytes = library.kept.bytes(of: id) }
+        }
+    }
+
+    private var state: String {
+        guard let id = player.bookID else { return "" }
+        guard library.reachable else { return "Your Mac isn't near. More is saved when you're back." }
+        let making = library.kept.making(id)
+        if making?.enabled == false { return "Turned off in Listen on iPhone on your Mac." }
+        switch making?.state {
+        case "battery": return "Plug in your Mac to make more."
+        case "making": return "Your Mac is making more: \(making?.done ?? 0) of \(making?.total ?? 0) lines."
+        case "error": return "Your Mac couldn't make some lines. It tries again soon."
+        default: return library.kept.saving == id ? "Saving to this iPhone…" : "Everything your Mac made is saved."
+        }
+    }
+}

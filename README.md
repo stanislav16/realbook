@@ -12,17 +12,18 @@ Everything runs on your own computer, for free and offline: natural-sounding Kok
 
 - **Mac (Apple silicon, macOS 14+):** open `RealBook.dmg` and drag **RealBook** into **Applications**. The app isn't notarized, so the first time macOS refuses to open it: go to System Settings → Privacy & Security and click **Open Anyway**.
 - **Windows 10/11 (64-bit):** unzip `RealBook-windows.zip` and run `RealBook.exe`. If SmartScreen warns about an unknown publisher, click **More info → Run anyway**. Windows has Kokoro and the Windows voices; designed voices and audiobook export are Mac-only for now.
+- **Linux (64-bit; Ubuntu 22.04, Debian 12, Fedora 36 or newer):** run `tar -xzf RealBook-linux.tar.gz`, then `RealBook/RealBook`. Download the Kokoro voices when it offers them; with `espeak-ng` installed you also get its voices. Designed voices and audiobook export are Mac-only for now.
 
-A short sample story is already in the library. Click **Add Book** (or drag a file onto the window) to import an `.epub` or `.txt`. Your books and the audio cache live in `~/Library/Application Support/RealBook` (Mac) or `%APPDATA%\RealBook` (Windows).
+A short sample story is already in the library. Click **Add Book** (or drag a file onto the window) to import an `.epub` or `.txt`. Your books and the audio cache live in `~/Library/Application Support/RealBook` (Mac), `%APPDATA%\RealBook` (Windows) or `~/.local/share/RealBook` (Linux).
 
 ## Build the app
 
 ```bash
 ./packaging/build_app.sh                                  # Mac: dist/RealBook.app and dist/RealBook.dmg
-uv run pyinstaller --noconfirm packaging/RealBook.spec    # Windows: dist/RealBook/RealBook.exe
+uv run pyinstaller --noconfirm packaging/RealBook.spec    # Windows or Linux: dist/RealBook/RealBook[.exe]
 ```
 
-The Mac app is about 490 MB, most of it the MLX runtime for designed voices; voice models are downloaded from inside the app. The Windows build is made and tested on GitHub Actions (`.github/workflows/windows.yml`) and attached to each release. Neither build is signed with a developer certificate yet.
+The Mac app is about 490 MB, most of it the MLX runtime for designed voices; voice models are downloaded from inside the app. The Windows and Linux builds are made and tested on GitHub Actions (`.github/workflows/build.yml`) and attached to each release. No build is signed with a developer certificate yet.
 
 `uv run realbook-selftest [--kokoro]` (or `RealBook --selftest` for a packaged app) imports the sample book and speaks a line with each available engine, in a temporary library.
 
@@ -96,11 +97,11 @@ To use it, paste an Anthropic API key into **Settings** (gear icon). The key is 
 - `realbook/kokoro_tts.py`: Kokoro model download, voice catalogue and synthesis
 - `realbook/designed.py`: designed voices (Qwen3-TTS): model download, voice descriptions, voice design and cloning (on one MLX worker thread)
 - `realbook/tts.py`: picks the engine (Qwen, Kokoro or a system voice) and caches audio
-- `realbook/system.py`: what differs between macOS and Windows (data folder, system voices, audio files, opening things)
+- `realbook/system.py`: what differs between macOS, Windows and Linux (data folder, system voices, audio files, opening things)
 - `realbook/remote.py`: listening on other devices (second server, pairing key, QR code)
 - `realbook/export.py`, `realbook/m4b.py`: audiobook export, and writing chapters and tags into the .m4b
 - `realbook/model_finder.py`: the Hugging Face model search
-- `realbook/selftest.py`: the smoke test used by the Windows build
+- `realbook/selftest.py`: the smoke test used by the Windows and Linux builds
 - `realbook/server.py`: local API; `realbook/static/`: the reader UI
 - `realbook/app.py`: the native window (pywebview) that hosts the UI
 - `packaging/`: app icons, PyInstaller spec, and `build_app.sh`

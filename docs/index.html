@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RealBook: books read aloud by their characters</title>
-  <meta name="description" content="RealBook reads your books aloud with a different, fitting voice for every character, designed from how the book describes them. Free and offline on Mac and Windows.">
+  <meta name="description" content="RealBook reads your books aloud with a different, fitting voice for every character, designed from how the book describes them. Free and offline on Mac, Windows and Linux.">
   <link rel="icon" href="images/icon.png">
   <style>
     :root {
@@ -80,6 +80,7 @@
       <div class="buttons">
         <a class="btn" href="https://github.com/stanislav16/realbook/releases/latest/download/RealBook.dmg">Download for Mac<small>Apple silicon · macOS 14 or later</small></a>
         <a class="btn secondary" href="https://github.com/stanislav16/realbook/releases/latest/download/RealBook-windows.zip">Download for Windows<small>Windows 10 or 11, 64-bit</small></a>
+        <a class="btn secondary" href="https://github.com/stanislav16/realbook/releases/latest/download/RealBook-linux.tar.gz">Download for Linux<small>64-bit, Ubuntu 22.04 or newer</small></a>
       </div>
       <p class="note">Open source (GPL-3.0). No account, no subscription. Works with DRM-free EPUB and text files.</p>
       <div class="shot"><img src="images/reader.png" alt="RealBook reading a book, with each character's lines in their own colour and the cast of voices beside it"></div>
@@ -123,6 +124,7 @@
         <tr><th>Computer</th><th>What you get</th><th>First launch</th></tr>
         <tr><td>Mac with Apple silicon, macOS 14+</td><td>Mac voices, Kokoro, listening on your phone and audiobook export. Designed voices (Qwen3-TTS) need macOS 26 or later.</td><td>Open <code>RealBook.dmg</code> and drag RealBook to Applications. The app isn't notarized yet: the first time, macOS will refuse to open it; go to System Settings → Privacy &amp; Security and click <b>Open Anyway</b>.</td></tr>
         <tr><td>Windows 10 or 11</td><td>Windows voices, Kokoro, listening on your phone. Designed voices and audiobook export are Mac-only for now.</td><td>Unzip <code>RealBook-windows.zip</code> and run <code>RealBook.exe</code>. SmartScreen may warn about an unknown publisher: click <b>More info → Run anyway</b>.</td></tr>
+        <tr><td>Linux, 64-bit (Ubuntu 22.04, Debian 12, Fedora 36 or newer)</td><td>Kokoro, and espeak-ng voices if it's installed; listening on your phone. Designed voices and audiobook export are Mac-only for now.</td><td>Unpack <code>RealBook-linux.tar.gz</code> and run <code>RealBook/RealBook</code>. Download the Kokoro voices when it offers them: that's what reads your books.</td></tr>
       </table>
       <p class="note">Voice models are downloaded from inside the app the first time you choose them: Kokoro is 354 MB, designed voices 6.3 GB.</p>
     </section>

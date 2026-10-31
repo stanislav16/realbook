@@ -119,14 +119,15 @@ def _espeak_voices() -> list[dict]:
     if not (espeak := _espeak()):
         return []
     out = run([espeak, "--voices=en"], capture_output=True, text=True, timeout=20).stdout
-    voices = []
+    voices: dict[str, dict] = {}  # it lists some voices twice
     for line in out.splitlines()[1:]:
         parts = line.split()
         if len(parts) >= 4:
             sex = parts[2].rsplit("/", 1)[-1]
-            voices.append({"name": parts[1], "locale": parts[1].replace("-", "_"),
-                           "gender": {"M": "male", "F": "female"}.get(sex, "unknown"), "age": "adult"})
-    return voices
+            language, _, region = parts[1].partition("-")
+            voices[parts[1]] = {"name": parts[1], "locale": f"{language}_{region[:2].upper()}" if region else language,
+                                "gender": {"M": "male", "F": "female"}.get(sex, "unknown"), "age": "adult"}
+    return list(voices.values())
 
 
 _SAPI = (

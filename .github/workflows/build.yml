@@ -4,7 +4,7 @@ name: Windows and Linux builds
 
 on:
   push:
-    branches: [main, ci-builds]
+    branches: [main]
   pull_request:
   release:
     types: [published]

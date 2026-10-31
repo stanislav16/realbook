@@ -26,6 +26,7 @@ final class Player {
     private(set) var loading = false
     private(set) var problem: String?
     private(set) var chapterTitles: [String] = []
+    private(set) var chapterSections: [String] = []  // the part of the book each chapter is in, or ""
     private(set) var chapter = 0
     private(set) var current: Spoken?
     /// The chapter as the reading page shows it, and the line being read in it.
@@ -185,6 +186,7 @@ final class Player {
         mode = .offline
         timeline = t
         chapterTitles = t.chapters.map(\.title)
+        chapterSections = t.chapters.map { $0.section ?? "" }
         offline.replaceCurrentItem(with: AVPlayerItem(url: Library.audio(of: book.id)))
         offline.currentItem?.audioTimePitchAlgorithm = .timeDomain
         chapter = -1  // so the page is made for wherever this starts
@@ -195,7 +197,10 @@ final class Player {
     private func loadCast(_ id: String) async {
         guard macBook == nil, let library, library.reachable, let book = try? await library.mac.book(id), bookID == id else { return }
         macBook = book
-        if mode == .offline { buildOfflinePage() }
+        if mode == .offline, let t = timeline {
+            chapterSections = t.chapters.map { book.toc.indices.contains($0.chapter) ? book.toc[$0.chapter].section ?? "" : "" }
+            buildOfflinePage()
+        }
     }
 
     /// The reading page for the offline copy's chapter, from its timeline.
@@ -208,7 +213,7 @@ final class Player {
             return PageLine(segment: l.segment, text: l.text, para: l.para ?? n, dialogue: l.q != nil || l.speaker != nil, q: l.q, speaker: l.speaker)
         }
         pageTitle = t.chapters[chapter].title
-        pageSection = macBook.flatMap { $0.toc.indices.contains(ci) ? $0.toc[ci].section : nil }.flatMap { $0.isEmpty || $0 == pageTitle ? nil : $0 }
+        pageSection = chapterSections.indices.contains(chapter) && !chapterSections[chapter].isEmpty && chapterSections[chapter] != pageTitle ? chapterSections[chapter] : nil
         revision += 1
     }
 
@@ -225,11 +230,13 @@ final class Player {
             macBook = book
             title = book.title
             chapterTitles = book.toc.map(\.title)
+            chapterSections = book.toc.map { $0.section ?? "" }
             if saved != nil {
                 Task {  // what's saved shows at once; the Mac may have newer details
                     if let fresh = try? await library.mac.book(id), bookID == id, mode == .live {
                         macBook = fresh
                         chapterTitles = fresh.toc.map(\.title)
+                        chapterSections = fresh.toc.map { $0.section ?? "" }
                     }
                 }
             }
@@ -263,6 +270,13 @@ final class Player {
         revision += 1
         showLiveLine()
         updateNowPlaying()
+    }
+
+    /// The chapter with the part it's in, since the numbers can start again in each part.
+    var chapterLabel: String {
+        guard chapterTitles.indices.contains(chapter) else { return "" }
+        let name = chapterTitles[chapter], section = chapterSections.indices.contains(chapter) ? chapterSections[chapter] : ""
+        return section.isEmpty || name.hasPrefix(section) ? name : "\(section) · \(name)"
     }
 
     // MARK: - controls

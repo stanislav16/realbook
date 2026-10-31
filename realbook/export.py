@@ -60,6 +60,8 @@ def timeline(book: dict) -> dict:
     if any(len(line) < 7 for line in data["lines"]) and all(
             line[1] < len(chapters) and line[2] < len(chapters[line[1]]["segments"]) for line in data["lines"]):
         data["lines"] = [timeline_line(book, ms, ci, si, who) for ms, ci, si, who, *_ in data["lines"]]
+    for c in data["chapters"]:
+        c["section"] = chapters[c["chapter"]].get("section", "") if c["chapter"] < len(chapters) else ""
     return data
 
 

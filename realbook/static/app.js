@@ -458,14 +458,27 @@ const sectionOf = (c) => (c && c.section && c.section !== c.title ? c.section : 
 
 function renderToc() {
   const rows = [];
-  let current = null;
+  let current = null, part = null;
+  const add = (row) => (part ? part.append(row) : rows.push(row));
+  // Each part is its own block, so its heading stays in view only while its chapters do.
+  const startPart = () => {
+    part = el("div", { class: "toc-part" });
+    rows.push(part);
+  };
   S.book.toc.forEach((c, i) => {
     const section = sectionOf(c);
-    if (section && section !== current) {
-      rows.push(el("button", { class: "toc-section", onclick: () => pickChapter(i) }, section));
+    // A chapter named after its part, with more chapters under it, is that part's heading.
+    const heading = !section && c.section && S.book.toc[i + 1]?.section === c.section;
+    if (section !== current && section) {
+      startPart();
+      add(el("button", { class: "toc-section", onclick: () => pickChapter(i) }, section));
+    } else if (heading) {
+      startPart();
+    } else if (!section) {
+      part = null;
     }
     current = section || c.section || null;
-    rows.push(el("button", { class: `${i === S.chapterIdx ? "current" : ""} ${section ? "nested" : ""}`, onclick: () => pickChapter(i) }, c.title));
+    add(el("button", { class: `${i === S.chapterIdx ? "current" : ""} ${section ? "nested" : ""} ${heading ? "toc-section" : ""}`, onclick: () => pickChapter(i) }, c.title));
   });
   $("#toc-list").replaceChildren(...rows);
 }
@@ -477,6 +490,7 @@ function togglePanel(which) {
   if (which === "toc") {
     $("#toc-btn").classList.toggle("on", on);
     const list = $("#toc"), current = $("#toc-list .current");
+    list.style.setProperty("--toc-head", `${list.querySelector(".panel-head").offsetHeight}px`);
     if (on && current) list.scrollTop = current.offsetTop - list.clientHeight / 2;
   }
 }

@@ -41,6 +41,7 @@ struct Timeline: Codable {
         var ms: Int
         var title: String
         var chapter: Int
+        var section: String?  // the part it belongs to; copies saved before parts came along leave it out
     }
 
     /// One spoken line: [start ms, chapter, segment (-1: the chapter's title), speaker id or null, text,

@@ -178,8 +178,8 @@ struct PlayerScreen: View {
                 .padding(.top, 16)
             VStack(spacing: 3) {
                 Text(player.title).font(.headline).multilineTextAlignment(.center).lineLimit(2)
-                if player.chapterTitles.indices.contains(player.chapter) {
-                    Text(player.chapterTitles[player.chapter]).font(.subheadline).foregroundStyle(muted).lineLimit(1)
+                if !player.chapterLabel.isEmpty {
+                    Text(player.chapterLabel).font(.subheadline).foregroundStyle(muted).lineLimit(1)
                 }
             }
             .padding(.vertical, 16)
@@ -407,27 +407,88 @@ struct ChapterList: View {
     @Environment(Player.self) private var player
     let close: () -> Void
 
+    /// Chapters in a row from one part of the book. The heading goes to the part's first chapter,
+    /// and stands in for it when they share a name.
+    private struct Part: Identifiable {
+        var first: Int
+        var heading: String?
+        var rows: [Int]
+        var id: Int { first }
+    }
+
+    private var parts: [Part] {
+        var parts: [Part] = []
+        for i in player.chapterTitles.indices {
+            let section = player.chapterSections.indices.contains(i) ? player.chapterSections[i] : ""
+            if !section.isEmpty, parts.last?.heading == section {
+                parts[parts.count - 1].rows.append(i)
+            } else {
+                parts.append(Part(first: i, heading: section.isEmpty ? nil : section, rows: [i]))
+            }
+        }
+        return parts.map { part in
+            guard let heading = part.heading, player.chapterTitles[part.first] == heading else { return part }
+            if part.rows.count == 1 { return Part(first: part.first, heading: nil, rows: part.rows) }  // a part that's one chapter
+            return Part(first: part.first, heading: heading, rows: Array(part.rows.dropFirst()))
+        }
+    }
+
+    private func go(to chapter: Int) {
+        player.goTo(chapter: chapter)
+        close()
+    }
+
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
+                let parts = parts
                 List {
-                    ForEach(Array(player.chapterTitles.enumerated()), id: \.offset) { i, title in
-                        Button {
-                            player.goTo(chapter: i)
-                            close()
-                        } label: {
-                            HStack {
-                                Text(title).foregroundStyle(.primary)
-                                Spacer()
-                                if i == player.chapter { Image(systemName: "speaker.wave.2.fill").foregroundStyle(.secondary) }
+                    ForEach(parts) { part in
+                        Section {
+                            ForEach(part.rows, id: \.self) { i in
+                                Button {
+                                    go(to: i)
+                                } label: {
+                                    HStack {
+                                        Text(player.chapterTitles[i]).foregroundStyle(.primary)
+                                        Spacer()
+                                        if i == player.chapter { Image(systemName: "speaker.wave.2.fill").foregroundStyle(.secondary) }
+                                    }
+                                    .padding(.leading, part.heading == nil ? 0 : 14)
+                                }
+                                .id(i)
+                                .listRowBackground(Color.clear)
+                            }
+                        } header: {
+                            if let heading = part.heading {
+                                Button {
+                                    go(to: part.first)
+                                } label: {
+                                    HStack {
+                                        Text(heading).font(.subheadline.bold()).foregroundStyle(.primary).textCase(nil)
+                                        Spacer()
+                                        if part.first == player.chapter && !part.rows.contains(part.first) {
+                                            Image(systemName: "speaker.wave.2.fill").foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity)
+                                    .background(.regularMaterial)  // the chapters scroll under it
+                                }
+                                .listRowInsets(EdgeInsets())
                             }
                         }
-                        .id(i)
-                        .listRowBackground(Color.clear)
                     }
                 }
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                .onAppear { proxy.scrollTo(player.chapter, anchor: .center) }
+                .onAppear {
+                    // A chapter shown as its part's heading has no row of its own: go to the row after it.
+                    let part = parts.last { $0.first <= player.chapter }
+                    let target = part?.rows.contains(player.chapter) == true ? player.chapter : part?.rows.first
+                    if let target { proxy.scrollTo(target, anchor: .center) }
+                }
             }
             .navigationTitle("Chapters")
             .navigationBarTitleDisplayMode(.inline)

@@ -471,6 +471,30 @@ def _write_wav(path: Path, samples: np.ndarray) -> None:
         w.writeframes((np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes())
 
 
+# Designing is random, and now and then a voice comes out nothing like its description, which every
+# one of the character's lines then copies: Duke Leto, a "deep" man, got 205 Hz with a wide swing and
+# sounded like he was shouting, while 15 more designs of him came out at 76-129 Hz.
+DESIGN_RETRIES = 3
+MAX_MAN_HZ, MAX_YOUNG_MAN_HZ = 150, 180
+MAX_SWING = 2.8  # the top of the voice's pitch over the bottom
+
+
+def _voice_fits(samples: np.ndarray, description: str) -> bool:
+    """Whether a man's voice is about where it should be. Old voices are left alone, since gravel
+    throws the pitch finder off; so are voices asked to be high, boys' and women's."""
+    words = description.lower()
+    man = re.search(r"\b(adult|young|middle-aged) man\b", words)
+    if not man or re.search(r"\bhigh\b", words):
+        return True
+    n = 2048
+    found = [_pitch(samples[i:i + n]) for i in range(0, max(1, len(samples) - n), SAMPLE_RATE // 25)]
+    found = [p for p in found if p > 0]
+    if not found:
+        return False
+    limit = MAX_YOUNG_MAN_HZ if man.group(1) == "young" else MAX_MAN_HZ
+    return np.median(found) <= limit and np.percentile(found, 90) / np.percentile(found, 10) <= MAX_SWING
+
+
 def _design(engine: Engine, key: str) -> Path:
     """The voice's reference clip, designing it now if needed."""
     global _last_design
@@ -479,7 +503,12 @@ def _design(engine: Engine, key: str) -> Path:
         return ref
     info_path = voices_dir(engine) / f"{key}.json"
     info = json.loads(info_path.read_text())
-    samples = _generate(engine.design(_model(engine, engine.design_role), info["description"]))
+    model = _model(engine, engine.design_role)
+    samples = _generate(engine.design(model, info["description"]))
+    for _ in range(DESIGN_RETRIES):
+        if _voice_fits(samples, info["description"]):
+            break
+        samples = _generate(engine.design(model, info["description"]))
     _last_design = time.monotonic()
     info["reference_text"] = REFERENCE_TEXT  # cloning must use exactly what the sample says
     info_path.write_text(json.dumps(info))

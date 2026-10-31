@@ -90,6 +90,7 @@ class Engine:
     read_role: str
     design: Callable  # (model, description, sample text) -> generator of audio chunks
     read: Callable  # (model, text, reference clip, what the clip says) -> generator of audio chunks
+    read_many: Callable  # (model, texts, reference clip, what the clip says) -> generator of numbered audio chunks
     speed_note: str = ""
     design_version: int = 1  # bump when design settings change, so voices are designed again
     styles: tuple[str, ...] = ("quiet",)  # ways of speaking it can do (see STYLES)
@@ -125,6 +126,7 @@ QWEN = Engine(
     design_role="designer", read_role="reader",
     design=lambda m, description, text=REFERENCE_TEXT: m.generate_voice_design(text=text, instruct=description, language="English"),
     read=lambda m, text, ref, ref_text: m.generate(text=text, ref_audio=str(ref), ref_text=ref_text, lang_code="english"),
+    read_many=lambda m, texts, ref, ref_text: m.batch_generate(texts=texts, ref_audio=str(ref), ref_text=ref_text, lang_code="english"),
     design_version=3,  # 2: an expressive sample; 3: a moderate one
     styles=("quiet", "loud", "upset"),
     fingerprint=True,
@@ -371,6 +373,8 @@ _models: dict[tuple[str, str], object] = {}
 _last_design = 0.0
 _last_line = 0.0  # when a line was last asked for: background designs wait until reading is quiet
 QUIET_SECONDS = 3.0
+_last_listened = 0.0  # when a line was last needed right now: groups of lines wait until nobody is listening
+LISTENING_SECONDS = 30.0
 _queued_designs: set[str] = set()
 
 
@@ -632,7 +636,26 @@ def _speak(engine: Engine, out: Path, text: str, key: str, style: str = "") -> N
         _last_line = time.monotonic()  # quiet is measured from when a line finished
 
 
-def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "") -> None:
+def _speak_many(engine: Engine, key: str, items: list[tuple[Path, str]]) -> None:
+    """Several lines in one voice at once, which takes under half the time and energy and no more
+    memory. They sound as different from lines made alone as any two readings of a line do. Each
+    then gets the same checks as a line made alone."""
+    global _last_line
+    try:
+        ref = _design(engine, key)
+        info = json.loads((voices_dir(engine) / f"{key}.json").read_text())
+        ref_text = info.get("reference_text", CALM_REFERENCE_TEXT)
+        parts: dict[int, list[np.ndarray]] = {}
+        for r in engine.read_many(_model(engine, engine.read_role), [text for _, text in items], ref, ref_text):
+            parts.setdefault(r.sequence_idx, []).append(np.array(r.audio, dtype=np.float32).ravel())
+        for i, (out, text) in enumerate(items):
+            first = np.clip(np.concatenate(parts[i]), -1, 1) if i in parts else None
+            _speak_line(engine, out, text, key, first=first if first is not None and len(first) > SAMPLE_RATE // 10 else None)
+    finally:
+        _last_line = time.monotonic()
+
+
+def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "", first: np.ndarray | None = None) -> None:
     ref = _design(engine, key)
     info = json.loads((voices_dir(engine) / f"{key}.json").read_text())
     ref_text = info.get("reference_text", CALM_REFERENCE_TEXT)  # voices made before samples were recorded with it
@@ -661,7 +684,7 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "")
         finally:
             model.extract_speaker_embedding = fingerprint
 
-    samples = generate()
+    samples = first if first is not None else generate()
     acceptable = lambda s: True
     if styled and STYLES[style].check_line:
         # A styled line can still come out as someone else (higher, another accent): it's made
@@ -779,6 +802,21 @@ def synthesize(out: Path, text: str, voice: str, urgent: bool = True, style: str
     global _last_line
     _last_line = time.monotonic()
     _submit(URGENT if urgent else PREFETCH, _speak, engine_of(voice), out, text, _key(voice), style).result()
+
+
+def synthesize_many(voice: str, items: list[tuple[Path, str]]) -> None:
+    """Render several lines in one designed voice, each (file, text). Not urgent."""
+    _submit(PREFETCH, _speak_many, engine_of(voice), _key(voice), items).result()
+
+
+def note_listening() -> None:
+    global _last_listened
+    _last_listened = time.monotonic()
+
+
+def listening() -> bool:
+    """Someone is waiting on lines: a group of lines would keep them waiting longer than one line."""
+    return time.monotonic() - _last_listened < LISTENING_SECONDS
 
 
 def warm_up(engine: Engine) -> None:

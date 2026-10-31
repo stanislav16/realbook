@@ -99,6 +99,8 @@ def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: i
     """Render `text` to an audio file (once) and return its path. `style` is how the narration says the
     line is spoken ("quiet", "loud", "upset"); voices that can't do it read it as usual. `take` above 0
     is another reading of the line (Read Again)."""
+    if urgent:
+        designed.note_listening()
     text, voice, style = _resolve(text, voice, style)
     key = _key(text, voice, rate, pitch_shift, style, take)
     out = cache_dir / f"{key}{system.AUDIO_EXT}"
@@ -123,3 +125,36 @@ def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: i
             system.speak(text, voice, rate, pitch_shift, tmp)
         tmp.rename(out)
     return out
+
+
+def can_group(voice: str, style: str) -> bool:
+    """Lines in a designed voice, read as usual, can be made together."""
+    voice = _resolve("", voice, style)
+    return bool(designed.engine_of(voice[1])) and not voice[2]
+
+
+def synthesize_many(cache_dir: Path, voice: str, rate: int, pitch_shift: int, lines: list[tuple[str, int]]) -> None:
+    """Render several (text, take) lines in one designed voice together. A line someone else is making
+    just now is left to them."""
+    wanted: dict[Path, str] = {}
+    held = []
+    try:
+        for text, take in lines:
+            text = _resolve(text, voice, "")[0]
+            key = _key(text, _resolve(text, voice, "")[1], rate, pitch_shift, "", take)
+            out = cache_dir / f"{key}{system.AUDIO_EXT}"
+            with _locks_guard:
+                lock = _locks.setdefault(key, threading.Lock())
+            if out in wanted or out.exists() or not lock.acquire(blocking=False):
+                continue
+            held.append(lock)
+            wanted[out] = text
+        if not wanted:
+            return
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        designed.synthesize_many(_resolve("", voice, "")[1], [(out.with_suffix(".tmp" + system.AUDIO_EXT), text) for out, text in wanted.items()])
+        for out in wanted:
+            out.with_suffix(".tmp" + system.AUDIO_EXT).rename(out)
+    finally:
+        for lock in held:
+            lock.release()

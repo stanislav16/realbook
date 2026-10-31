@@ -15,12 +15,14 @@ import subprocess
 import threading
 import time
 
-from . import heuristic, lines, store, system
+from . import designed, heuristic, lines, store, system
 
 HOURS = 4
 WORDS_PER_HOUR = 9300  # about how fast the voices read: Dune is 205,000 words and about 22 hours
 RESUME_WITHIN = 3 * 86400  # after this Mac restarts, carry on if the iPhone asked this recently
-REPLAN_EVERY = 20  # lines; the reader may have moved on, or a voice changed
+WINDOW = 64  # lines looked at together, and then the plan is made again: the reader may have moved on, or a voice changed
+GROUP = 8  # lines made at once: more than this is no faster
+GROUP_CHARS = 1200  # and no longer than this in all, so someone who starts listening doesn't wait long
 
 log = logging.getLogger(__name__)
 
@@ -133,6 +135,46 @@ def _run() -> None:
             _thread = None
 
 
+def _groups(book: dict, todo: list[dict]) -> list[list[dict]]:
+    """Lines to make together: the same voice and about the same length, since a group takes as long
+    as its longest line. The groups go in book order, as far as they can."""
+    voices: dict[str, list[dict]] = {}
+    alone = []
+    for l in todo:
+        segs = book["chapters"][l["chapter"]]["segments"]
+        voice = lines.can_group(book, segs, segs[l["segment"]])
+        if voice:
+            voices.setdefault(voice, []).append(l)
+        else:
+            alone.append([l])
+    groups = alone
+    for same in voices.values():
+        same.sort(key=lambda l: len(book["chapters"][l["chapter"]]["segments"][l["segment"]]["text"]))
+        group: list[dict] = []
+        chars = 0
+        for l in same:
+            n = len(book["chapters"][l["chapter"]]["segments"][l["segment"]]["text"])
+            if group and (len(group) >= GROUP or chars + n > GROUP_CHARS):
+                groups.append(group)
+                group, chars = [], 0
+            group.append(l)
+            chars += n
+        if group:
+            groups.append(group)
+    return sorted(groups, key=lambda g: min((l["chapter"], l["segment"]) for l in g))
+
+
+def _make(book: dict, group: list[dict]) -> None:
+    pairs = [(book["chapters"][l["chapter"]]["segments"], book["chapters"][l["chapter"]]["segments"][l["segment"]]) for l in group]
+    if len(pairs) > 1 and not designed.listening():
+        try:
+            return lines.make_many(book, pairs)
+        except Exception:
+            log.exception("Couldn't make lines together; making them one at a time")
+    for segs, seg in pairs:
+        lines.make(book, segs, seg, urgent=False)  # someone listening goes first
+
+
 def _work() -> None:
     fails = 0
     while True:
@@ -156,15 +198,14 @@ def _work() -> None:
             time.sleep(30)
             continue
         _state["state"] = "making"
-        for l in todo[:REPLAN_EVERY]:
+        for group in _groups(book, todo[:WINDOW]):
             if _wanted != book_id or not enabled():
                 break
-            segs = book["chapters"][l["chapter"]]["segments"]
             try:
                 system.keep_awake()
-                lines.make(book, segs, segs[l["segment"]], urgent=False)  # someone listening goes first
+                _make(book, group)
                 fails = 0
-                _state["done"] += 1
+                _state["done"] += len(group)
             except Exception:
                 log.exception("Couldn't make a line for the iPhone")
                 fails += 1

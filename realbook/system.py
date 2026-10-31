@@ -206,7 +206,8 @@ def keep_awake(seconds: int = 600) -> None:
     if MAC:
         if _awake is not None and _awake.poll() is None:
             _awake.terminate()
-        _awake = popen(["caffeinate", "-i", "-t", str(seconds)])
+        # -w: it ends with this app, or the Mac stays awake and the Dock shows the app as still running.
+        _awake = popen(["caffeinate", "-i", "-t", str(seconds), "-w", str(os.getpid())])
     elif WINDOWS:
         threading.Thread(target=_windows_awake, daemon=True).start()
 

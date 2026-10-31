@@ -745,7 +745,8 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
 
     def faults(s: np.ndarray) -> tuple[int, float]:  # sounding like a question is worse than a clipped end
         clipped, rising = _ending(s) > CUT_DB, statement and _end_rise(s) > MAX_STATEMENT_RISE
-        return int(clipped) + 2 * int(rising), _ending(s)
+        ran_on = _dots_gaps(s, text)[1] if SPACED_DOTS in text else 0  # ran straight through the dots
+        return int(clipped) + 2 * int(rising) + ran_on, _ending(s)
 
     for _ in range(CUT_RETRIES):
         if not faults(samples)[0]:
@@ -821,6 +822,8 @@ DOTS = re.compile(r"(?:\s*(?:…|\.\s?\.\s?\.)\.?\s*)+")
 DASHES = re.compile(r"\s*(?:—|―|-{2,})\s*|\s+–\s+")  # a long dash stops the voice the same way; not "1914–1918"
 SPACED_DOTS = ". . ."
 DOTS_PAUSE, DOTS_TAIL = 0.65, 0.45  # seconds at dots in a line, and after dots ending one
+DOTS_MIN_GAP = 0.16  # seconds; anything shorter can be a silence inside a word
+PAUSES_VERSION = 2  # in the name of the audio of lines with dots: bump to make only those again
 
 
 def spaced_dots(text: str) -> str:
@@ -830,21 +833,21 @@ def spaced_dots(text: str) -> str:
     return DOTS.sub(SPACED_DOTS + " ", DOTS.sub("", text, count=1) if DOTS.match(text) else text).strip()
 
 
-def _longer_pauses(samples: np.ndarray, text: str) -> np.ndarray:
-    """Lengthens the silence the voice left nearest each dots in `text`, as far as it's found one."""
-    if SPACED_DOTS not in text:
-        return samples
+def _dots_gaps(samples: np.ndarray, text: str) -> tuple[list[tuple[int, int]], int]:
+    """The silences (in 20 ms frames) where the voice paused for the dots in `text`, and how many dots
+    it didn't pause at. Only a real pause counts: the silence inside a word, like before the k of
+    "Harkon", is shorter, and lengthening that splits the word."""
     plain = text.replace(SPACED_DOTS, "…")
-    ends = bool(re.search(r"…\s*[\"”’')\]?!]*\s*$", plain))
     frame = SAMPLE_RATE // 50
     n = len(samples) // frame
-    if n < 5:
-        return samples
+    marks = [m.start() / len(plain) for m in re.finditer("…", plain) if plain[m.end():].strip(" .?!\"”’')]")]
+    if n < 5 or not marks:
+        return [], 0
     rms = np.sqrt(np.mean(samples[:n * frame].reshape(n, frame) ** 2, axis=1))
     on = rms > rms.max() * 0.03
     voiced = np.where(on)[0]
     if not len(voiced):
-        return samples
+        return [], len(marks)
     first, last = int(voiced[0]), int(voiced[-1])
     gaps: list[tuple[int, int]] = []
     i = first
@@ -855,37 +858,36 @@ def _longer_pauses(samples: np.ndarray, text: str) -> np.ndarray:
         j = i
         while j <= last and not on[j]:
             j += 1
-        gaps.append((i, j))
+        if (j - i) * frame / SAMPLE_RATE >= DOTS_MIN_GAP:
+            gaps.append((i, j))
         i = j
-    chosen: dict[tuple[int, int], float] = {}
     reach = max(0.2 * (last - first), 25)  # on a short line, a word can take up much of it: half a second either way
-    for m in re.finditer("…", plain):
-        if not plain[m.end():].strip(" .?!\"”’')]"):
-            continue
-        want = first + m.start() / len(plain) * (last - first)
-        near = [g for g in gaps if abs((g[0] + g[1]) / 2 - want) < reach]
+    chosen: list[tuple[int, int]] = []
+    missing = 0
+    for mark in marks:
+        want = first + mark * (last - first)
+        near = [g for g in gaps if g not in chosen and abs((g[0] + g[1]) / 2 - want) < reach]
         if near:
-            gap = min(near, key=lambda g: abs((g[0] + g[1]) / 2 - want))
-        else:  # it ran straight on: the quietest moment around there
-            low, high = max(first + 1, int(want - reach)), min(last, int(want + reach))
-            if high <= low:
-                continue
-            quiet = low + int(np.argmin(rms[low:high]))
-            gap = (quiet, quiet)
-        chosen[gap] = DOTS_PAUSE - (gap[1] - gap[0]) * frame / SAMPLE_RATE
+            chosen.append(min(near, key=lambda g: abs((g[0] + g[1]) / 2 - want)))
+        else:
+            missing += 1
+    return sorted(chosen), missing
+
+
+def _longer_pauses(samples: np.ndarray, text: str) -> np.ndarray:
+    """Lengthens the pauses the voice left at the dots in `text`, and adds one after dots ending it."""
+    if SPACED_DOTS not in text:
+        return samples
+    frame = SAMPLE_RATE // 50
     parts, at = [], 0
-    edge = np.linspace(1, 0, SAMPLE_RATE // 100, dtype=np.float32)  # 10 ms, so it doesn't click
-    for gap, add in sorted(chosen.items()):
+    for gap in _dots_gaps(samples, text)[0]:
+        add = DOTS_PAUSE - (gap[1] - gap[0]) * frame / SAMPLE_RATE
         if add > 0:
-            middle = (gap[0] + gap[1]) // 2 * frame
-            before, after = samples[at:middle].copy(), samples[middle:].copy()
-            if len(before) > len(edge) and len(after) > len(edge):
-                before[-len(edge):] *= edge
-                after[:len(edge)] *= edge[::-1]
-            parts += [before, np.zeros(int(add * SAMPLE_RATE), np.float32)]
-            samples, at = np.concatenate([samples[:middle], after]), middle
+            middle = (gap[0] + gap[1]) // 2 * frame  # in silence, so it doesn't click
+            parts += [samples[at:middle], np.zeros(int(add * SAMPLE_RATE), np.float32)]
+            at = middle
     parts.append(samples[at:])
-    if ends:
+    if re.search(r"…\s*[\"”’')\]?!]*\s*$", text.replace(SPACED_DOTS, "…")):
         parts.append(np.zeros(int(DOTS_TAIL * SAMPLE_RATE), np.float32))
     return np.concatenate(parts)
 

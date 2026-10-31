@@ -81,7 +81,7 @@ def _resolve(text: str, voice: str, style: str) -> tuple[str, str, str]:
 
 def _key(text: str, voice: str, rate: int, pitch_shift: int, style: str, take: int) -> str:
     return hashlib.sha1((f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}{'|' + designed.style_tag(style) if style else ''}"
-                         f"{f'|take{take}' if take else ''}").encode()).hexdigest()
+                         f"{f'|take{take}' if take else ''}{f'|pauses{designed.PAUSES_VERSION}' if designed.SPACED_DOTS in text else ''}").encode()).hexdigest()
 
 
 def can_vary(voice: str) -> bool:

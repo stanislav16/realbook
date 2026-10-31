@@ -67,7 +67,6 @@ def _clean(text: str) -> str:
 
 def _resolve(text: str, voice: str, style: str) -> tuple[str, str, str]:
     """What will really be read: the voice to read it if this one was removed, and the style if it can do it."""
-    text = _clean(text)
     engine = designed.engine_of(voice)
     if engine and not designed.installed(engine):
         voice = "kokoro:af_heart"  # designed voices were removed; keep reading with the next best
@@ -76,8 +75,8 @@ def _resolve(text: str, voice: str, style: str) -> tuple[str, str, str]:
     if not (designed.supports(voice, style) or (style == "quiet" and voice.startswith("kokoro:"))):
         style = ""  # same audio as usual, so the same cached file
     if designed.engine_of(voice):
-        text = designed.spaced_dots(text)
-    return text, voice, style
+        return designed.spaced_dots(_clean(designed.DASHES.sub("…", text))), voice, style
+    return _clean(text), voice, style
 
 
 def _key(text: str, voice: str, rate: int, pitch_shift: int, style: str, take: int) -> str:

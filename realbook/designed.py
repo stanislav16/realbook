@@ -788,7 +788,8 @@ def _end_rise(samples: np.ndarray) -> float:
 # "…" written as ". . ." stops the voice skipping the pause (a third of readings had none); it still
 # doesn't pause for long, so the silence it leaves is lengthened. This beat reading the line in pieces
 # in a blind test.
-DOTS = re.compile(r"\s*(?:…|\.\s?\.\s?\.)\.?\s*")
+DOTS = re.compile(r"(?:\s*(?:…|\.\s?\.\s?\.)\.?\s*)+")
+DASHES = re.compile(r"\s*(?:—|―|-{2,})\s*|\s+–\s+")  # a long dash stops the voice the same way; not "1914–1918"
 SPACED_DOTS = ". . ."
 DOTS_PAUSE, DOTS_TAIL = 0.65, 0.45  # seconds at dots in a line, and after dots ending one
 

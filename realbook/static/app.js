@@ -237,16 +237,16 @@ const size = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : Math.round(n / 1e
 // Turning iPhone access on and off, the pairing code, and each book's offline copy (its export).
 async function renderPhone() {
   const grid = $("#books");
-  let r, books;
+  let r, books, ahead;
   try {
-    [r, books] = await Promise.all([api("/api/remote"), api("/api/phone/books")]);
+    [r, books, ahead] = await Promise.all([api("/api/remote"), api("/api/phone/books"), api("/api/ahead")]);
   } catch (e) {
     return grid.replaceChildren(el("div", { class: "empty" }, e.message));
   }
   if (S.filter !== "phone") return;
   // While an offline copy is being made this runs every 2 s: redraw only when something changed,
   // so the covers don't flicker.
-  const state = JSON.stringify([r, books]);
+  const state = JSON.stringify([r, books, ahead]);
   const unchanged = state === S.phoneState && S.phonePage?.isConnected;
   S.phoneState = state;
   const refresh = () => { if (S.filter === "phone" && !$("#library").classList.contains("hidden")) renderPhone(); };
@@ -271,7 +271,20 @@ async function renderPhone() {
       el("button", { class: "button primary", type: "button", onclick: toggle(true) }, "Turn On"));
   }
 
-  const running = books.some((b) => b.export.state === "running");
+  const making = ahead.enabled && (ahead.state === "making" || ahead.state === "battery");
+  const aheadNote = !ahead.enabled ? "Off. The iPhone plays live, and offline copies still work."
+    : ahead.state === "making" ? `Making the next hours of “${ahead.title}” for your iPhone: ${ahead.done} of ${ahead.total} lines. Your listening always goes first.`
+    : ahead.state === "battery" ? `Waiting for this Mac to be plugged in, to make the next hours of “${ahead.title}”.`
+    : ahead.state === "error" ? `Couldn't make some lines of “${ahead.title}”. It tries again the next time your iPhone connects.`
+    : ahead.title ? `The next hours of “${ahead.title}” are ready: ${ahead.total} lines.`
+    : "Starts by itself when you open RealBook on your iPhone.";
+  const away = el("section", { class: "phone-card" }, el("h4", {}, "Listening away from this Mac"),
+    el("p", { class: "muted small" }, "Your iPhone saves the next 4 hours of the book you're listening to, whenever it can reach this Mac, so you can leave without an offline copy. When a voice or a line changes, only that line is made and saved again."),
+    el("div", { class: "phone-row" }, el("div", { class: "phone-info" }, el("span", { class: "muted small" }, aheadNote)),
+      el("button", { class: "button small", type: "button", onclick: async () => {
+        try { await api("/api/ahead", { method: "POST", json: { enabled: !ahead.enabled } }); refresh(); } catch (e) { toast(e.message); }
+      } }, ahead.enabled ? "Turn Off" : "Turn On")));
+  const running = making || books.some((b) => b.export.state === "running");
   const rows = books.map((b) => {
     const x = b.export;
     const start = async () => { try { await api(`/api/books/${b.id}/export`, { method: "POST" }); refresh(); } catch (e) { toast(e.message); } };
@@ -294,7 +307,7 @@ async function renderPhone() {
     el("p", { class: "muted small" }, "The iPhone app plays a book offline from its offline copy: the whole book made into audio once, with the current voices. Making one takes as long as the voices need for lines you haven't listened to yet, so a long book can take hours; this Mac needs to stay on meanwhile."),
     ...rows);
   if (!unchanged) {
-    S.phonePage = el("div", { class: "phone-page" }, pairing, copies);
+    S.phonePage = el("div", { class: "phone-page" }, pairing, away, copies);
     grid.replaceChildren(S.phonePage);
   }
   if (running) S.phoneTimer = setTimeout(refresh, 2000);
@@ -827,6 +840,25 @@ function savePosition() {
 function voicesChanged() {
   S.rev++;
   S.prefetched.clear();
+}
+
+// A new reading of one line, and plays it: voices read a line a little differently each time.
+async function readAgain(i) {
+  const { book, chapterIdx } = S;
+  stop();
+  S.segIdx = i;
+  highlight();
+  toast("Reading it again…");
+  try {
+    await api(`/api/books/${book.id}/chapters/${chapterIdx}/segments/${i}/again`, { method: "POST" });
+  } catch (e) {
+    return toast(e.message);
+  }
+  if (S.book !== book || S.chapterIdx !== chapterIdx || S.segIdx !== i) return;  // moved on meanwhile
+  voicesChanged();
+  S.playing = true;
+  setPlayingUI();
+  playCurrent();
 }
 
 /* --------------------------------------------------------------------- cast */
@@ -1478,11 +1510,23 @@ $("#back").onclick = showLibrary;
 $("#toc-btn").onclick = () => togglePanel("toc");
 $("#text-btn").onclick = toggleText;
 $("#now-cover").onclick = toggleText;
+$("#page").addEventListener("contextmenu", (e) => {
+  const line = e.target.closest(".seg");
+  if (!line) return;
+  e.preventDefault();
+  const i = +line.dataset.i;
+  popupMenu({ contains: () => false, getBoundingClientRect: () => new DOMRect(e.clientX, e.clientY, 0, 0) }, [
+    { label: "Play from Here", action: () => { jumpTo(i); if (!S.playing) play(); } },
+    { label: "Read This Line Again", action: () => readAgain(i) },
+  ]);
+});
 $("#more-btn").onclick = (e) => {
   e.stopPropagation();
   const btn = e.currentTarget;
   if (!$("#aa-pop").classList.contains("hidden")) return closePopovers();  // the button again: closes it
   popupMenu(btn, [
+    { label: "Read This Line Again", disabled: !S.chapter, action: () => readAgain(S.segIdx) },
+    "-",
     { label: "Cast", note: "⌘2", action: () => togglePanel("cast") },
     { label: "Text Size & Theme…", action: () => toggleAa(btn) },
     S.config.export ? "-" : null,

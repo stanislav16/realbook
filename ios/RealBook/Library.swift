@@ -14,7 +14,13 @@ final class Library {
     var downloads: [String: Double] = [:]  // book id -> progress
 
     let mac = MacClient.shared
+    let kept = Kept()
     var paired: Bool { mac.pairing != nil }
+    /// The book open in the player: its next hours are the ones saved here.
+    var listening: String?
+    private var keeping: (id: String, task: Task<Void, Never>)?
+    private var unsent = Set(UserDefaults.standard.stringArray(forKey: "unsentPositions") ?? [])  // listened to away from the Mac
+    private static let remoteFile = folder.deletingLastPathComponent().appendingPathComponent("remote.json")
 
     static let folder: URL = {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Books")
@@ -34,7 +40,19 @@ final class Library {
 
     private var timelines: [String: Timeline] = [:]
 
-    init() { load() }
+    init() {
+        load()
+        // Known from last time, so away from the Mac the shelf is still there.
+        if let data = try? Data(contentsOf: Self.remoteFile), let saved = try? JSONDecoder().decode([RemoteBook].self, from: data) { remote = saved }
+        mac.changed = { [weak self] in
+            guard let self, self.paired, !self.reachable else { return }
+            Task { await self.sync() }
+        }
+    }
+
+    private func saveRemote() {
+        try? JSONEncoder().encode(remote).write(to: Self.remoteFile, options: .atomic)
+    }
 
     private func load() {
         let ids = (try? FileManager.default.contentsOfDirectory(atPath: Self.folder.path)) ?? []
@@ -127,8 +145,33 @@ final class Library {
         }
         if let i = remote.firstIndex(where: { $0.id == id }) {
             remote[i].position = MacPosition(chapter: chapter, segment: segment, updated: now)
+            saveRemote()
         }
-        Task { _ = try? await mac.send(position: MacPosition(chapter: chapter, segment: segment, updated: now), book: id) }
+        markUnsent(id, true)
+        Task {
+            if (try? await mac.send(position: MacPosition(chapter: chapter, segment: segment, updated: now), book: id)) != nil { markUnsent(id, false) }
+        }
+    }
+
+    private func markUnsent(_ id: String, _ on: Bool) {
+        if on { unsent.insert(id) } else { unsent.remove(id) }
+        UserDefaults.standard.set(Array(unsent), forKey: "unsentPositions")
+    }
+
+    /// Where the reader got to away from the Mac; the Mac keeps whichever is newer.
+    private func sendPositions() async throws {
+        for id in unsent {
+            guard let position = remoteBook(id)?.position else {
+                markUnsent(id, false)
+                continue
+            }
+            do {
+                _ = try await mac.send(position: position, book: id)
+                markUnsent(id, false)
+            } catch MacError.refused {
+                markUnsent(id, false)  // that book is gone from the Mac
+            }
+        }
     }
 
     /// Sends this iPhone's newer positions to the Mac and takes the Mac's newer ones. Returns the ids
@@ -137,9 +180,12 @@ final class Library {
     func sync() async -> Set<String> {
         guard paired else { return [] }
         do {
+            try await sendPositions()
             remote = try await mac.books()
+            saveRemote()
             reachable = true
             lastError = nil
+            keepCurrent()
         } catch {
             reachable = false
             lastError = error.localizedDescription
@@ -169,6 +215,44 @@ final class Library {
             }
         }
         return moved
+    }
+
+    // MARK: - keeping the next hours
+
+    /// Saves the next hours of the book being listened to, or else of the one listened to last.
+    private func keepCurrent() {
+        let latest = remote.filter { ($0.position.updated ?? 0) > 0 }.max { ($0.position.updated ?? 0) < ($1.position.updated ?? 0) }
+        guard let id = listening ?? latest?.id, remoteBook(id)?.finished != true else { return }
+        keep(id)
+    }
+
+    /// While the app is awake: asks the Mac what's ready and saves it. Books with an offline copy don't need it.
+    func keep(_ id: String) {
+        guard paired, book(id) == nil, keeping?.id != id else { return }
+        keeping?.task.cancel()
+        let task = Task { [weak self] in
+            while !Task.isCancelled {
+                let making = await self?.keepOnce(id) ?? false
+                try? await Task.sleep(for: .seconds(making ? 45 : 180))
+            }
+        }
+        keeping = (id, task)
+    }
+
+    /// Whether the Mac is still making more.
+    private func keepOnce(_ id: String) async -> Bool {
+        do {
+            try await sendPositions()
+            let manifest = try await mac.ahead(id)
+            reachable = true
+            try await kept.update(id, manifest, from: mac)
+            return manifest.making?.state == "making"
+        } catch MacError.unreachable {
+            reachable = false
+            return false
+        } catch {
+            return false
+        }
     }
 
     // MARK: - downloading

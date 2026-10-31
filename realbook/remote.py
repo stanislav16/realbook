@@ -7,9 +7,13 @@ it. They can read and listen to every book, but can't change settings or open th
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import io
+import logging
 import secrets
 import socket
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -22,10 +26,13 @@ HEADER = "x-realbook-key"  # how the iPhone app sends the key
 # Things only someone sitting at the Mac may do.
 BLOCKED = [("PUT", "/api/settings"), ("POST", "/api/open-link"), ("POST", "/api/open-voice-settings"),
            ("POST", "/api/kokoro/install"), ("POST", "/api/qwen/install"), ("POST", "/api/remote"),
-           ("POST", "/api/remote/reset")]
+           ("POST", "/api/remote/reset"), ("POST", "/api/ahead")]
+SERVICE = "_realbook._tcp.local."
 
 _server = None
 _lock = threading.Lock()
+_announce_stop: threading.Event | None = None
+log = logging.getLogger(__name__)
 
 
 def enabled() -> bool:
@@ -52,8 +59,53 @@ def lan_address() -> str | None:
 
 def mac_name() -> str:
     """This Mac's name on the local network ("Stanislavs-MacBook-Pro.local")."""
+    if system.MAC:
+        try:  # the name the network knows; gethostname() can be a different one
+            name = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True, text=True, timeout=5).stdout.strip()
+            if name:
+                return f"{name}.local"
+        except (OSError, subprocess.SubprocessError):
+            pass
     name = socket.gethostname()
     return name if name.endswith(".local") else f"{name.split('.')[0]}.local"
+
+
+def prove(nonce: str) -> str:
+    """Shows this Mac has the pairing key without giving it away."""
+    return hmac.new(token().encode(), nonce.encode(), hashlib.sha256).hexdigest()
+
+
+def _announce(stop: threading.Event) -> None:
+    """Tells the local network where RealBook is, and again whenever this Mac's address changes, so the
+    iPhone can find it on any Wi-Fi. If this fails, the iPhone still tries the last address and the name."""
+    from zeroconf import ServiceInfo, Zeroconf
+
+    zc = info = address = None
+    try:
+        while not stop.is_set():
+            now = lan_address()
+            if now != address:
+                if zc:
+                    zc.close()
+                    zc = None
+                address = now
+                if now:
+                    try:
+                        zc = Zeroconf(interfaces=[now])
+                        name = mac_name().removesuffix(".local")
+                        info = ServiceInfo(SERVICE, f"RealBook on {name}.{SERVICE}", addresses=[socket.inet_aton(now)], port=PORT,
+                                           server=f"realbook-{name}.local.")
+                        zc.register_service(info, allow_name_change=True)
+                    except Exception:
+                        log.exception("Couldn't announce RealBook on the network")
+                        address = None  # try again next time round
+            stop.wait(10)
+    finally:
+        if zc:
+            try:
+                zc.close()
+            except Exception:
+                pass
 
 
 def is_local(client_host: str | None) -> bool:
@@ -88,7 +140,7 @@ def _qr(text: str) -> str:
 
 
 def start() -> None:
-    global _server
+    global _server, _announce_stop
     import uvicorn
 
     from .server import app
@@ -98,6 +150,8 @@ def start() -> None:
             return
         _server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=PORT, log_level="warning"))
         threading.Thread(target=_server.run, daemon=True, name="remote-server").start()
+        _announce_stop = threading.Event()
+        threading.Thread(target=_announce, args=(_announce_stop,), daemon=True, name="remote-announce").start()
 
 
 def stop() -> None:
@@ -106,6 +160,8 @@ def stop() -> None:
         if _server is not None:
             _server.should_exit = True
             _server = None
+            if _announce_stop:
+                _announce_stop.set()
 
 
 def set_enabled(on: bool) -> dict:

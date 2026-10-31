@@ -6,7 +6,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).parent
-VERSION = "0.9.37"
+VERSION = "0.9.38"
 MAC = sys.platform == "darwin"
 
 datas = [
@@ -18,7 +18,7 @@ datas = [
     *collect_data_files("phonemizer"),
 ]
 binaries = collect_dynamic_libs("espeakng_loader")
-hiddenimports = collect_submodules("uvicorn") + collect_submodules("phonemizer") + ["kokoro_onnx", "qrcode.image.svg"]
+hiddenimports = collect_submodules("uvicorn") + collect_submodules("phonemizer") + collect_submodules("zeroconf") + ["kokoro_onnx", "qrcode.image.svg"]
 if MAC:
     # Qwen3-TTS (designed voices, Apple silicon only): MLX's Metal kernels, and mlx-audio's model code
     datas += collect_data_files("mlx", includes=["**/*.metallib"]) + collect_data_files("mlx_audio")

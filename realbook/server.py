@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import claude_analyzer, export, heuristic, review, kokoro_tts, local_analyzer, model_finder, designed, remote, store, system, tts, voices
+from . import ahead, claude_analyzer, export, heuristic, lines, review, kokoro_tts, local_analyzer, model_finder, designed, remote, store, system, tts, voices
 
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="RealBook")
@@ -31,7 +31,7 @@ and scan the QR code with this device's camera.</p></body>"""
 @app.middleware("http")
 async def guard_remote(request: Request, call_next):
     """Requests from other devices need the pairing key, and can't change things on the Mac."""
-    if remote.is_local(request.client.host if request.client else None):
+    if remote.is_local(request.client.host if request.client else None) or request.url.path == "/api/hello":
         return await call_next(request)
     if remote.authorised(request.headers.get(remote.HEADER)):  # the iPhone app
         if remote.blocked(request.method, request.url.path):
@@ -487,6 +487,24 @@ def set_speaker(book_id: str, n: int, sid: int, sp: Speaker):
     return {"changed": changed, "cast": b["characters"]}
 
 
+@app.post("/api/books/{book_id}/chapters/{n}/segments/{sid}/again")
+def read_again(book_id: str, n: int, sid: int):
+    """Throw away how this line was read; it's read anew the next time it's asked for."""
+    b = _book(book_id)
+    ch = _chapter(b, n)
+    if not 0 <= sid < len(ch["segments"]):
+        raise HTTPException(404, "Segment not found")
+    seg = ch["segments"][sid]
+    if not tts.can_vary(store.voice_for(b, seg)["voice"]):
+        raise HTTPException(400, "This voice reads a line the same way every time. Give the character a designed voice to hear it differently.")
+    with store.lock(book_id):
+        old = lines.path(b, ch["segments"], seg)
+        seg["take"] = seg.get("take", 0) + 1
+        store.save(b)
+    old.unlink(missing_ok=True)
+    return {"take": seg["take"]}
+
+
 # ---------------------------------------------------------------- analysis
 
 
@@ -676,6 +694,40 @@ def phone_books():
     return [{**s, "export": export.status(s["id"])} for s in store.list_books()]
 
 
+@app.post("/api/books/{book_id}/ahead")
+def keep_ahead(book_id: str):
+    """The iPhone is near: what to save for listening away from this Mac. Makes the next hours as well."""
+    b = _book(book_id)
+    ahead.want(book_id)
+    return ahead.manifest(b)
+
+
+@app.get("/api/ahead")
+def ahead_status():
+    s = ahead.status()
+    if s["book"]:
+        try:
+            s["title"] = store.load(s["book"])["title"]
+        except KeyError:
+            pass
+    return s
+
+
+class AheadToggle(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/ahead")
+def set_ahead(t: AheadToggle):
+    return ahead.set_enabled(t.enabled)
+
+
+@app.get("/api/hello")
+def hello(nonce: str = ""):
+    """Proves to the iPhone that this is its Mac, before it sends the pairing key. Open to anyone."""
+    return {"proof": remote.prove(nonce[:64]), "mac": remote.mac_name()}
+
+
 @app.get("/api/books/{book_id}/export/file")
 def export_file(book_id: str):
     path = export.output(_book(book_id))
@@ -707,11 +759,7 @@ def segment_audio(book_id: str, n: int, sid: int, prefetch: int = 0):
     ch = _chapter(b, n)
     if not 0 <= sid < len(ch["segments"]):
         raise HTTPException(404, "Segment not found")
-    seg = ch["segments"][sid]
-    v = store.voice_for(b, seg)
-    style = heuristic.line_styles(ch["segments"]).get(seg["q"], "") if seg["kind"] == "dialogue" and seg.get("speaker") else ""
-    path = tts.synthesize(store.audio_dir(book_id), store.spoken(b, heuristic.as_said(ch["segments"], seg)), v["voice"], v["rate"], v["pitch_shift"],
-                          urgent=not prefetch, style=style)
+    path = lines.make(b, ch["segments"], ch["segments"][sid], urgent=not prefetch)
     return FileResponse(path, media_type=system.AUDIO_TYPE, headers={"Cache-Control": "no-cache"})
 
 
@@ -766,6 +814,7 @@ def prepare_library() -> None:
         designed.warm_up(voices.designed_engine())
     if remote.enabled():
         remote.start()
+        ahead.resume()
     if store.list_books():
         return
     for sample in sorted((HERE / "samples").glob("*.txt")):

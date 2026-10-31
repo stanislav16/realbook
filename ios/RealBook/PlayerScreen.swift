@@ -113,8 +113,14 @@ struct PlayerScreen: View {
             modeSwitch
             Spacer()
             Menu {
+                Button("Read This Line Again", systemImage: "arrow.counterclockwise") { Task { await player.readAgain() } }
+                    .disabled(!player.canChangeSpeakers)
+                Divider()
                 Button("Cast", systemImage: "person.2") { sheet = .cast }
                 Button("Text Size & Theme", systemImage: "textformat.size") { sheet = .look }
+                if let saved = player.savedNote {
+                    Section("\(saved) on this iPhone") {}
+                }
             } label: {
                 Image(systemName: "ellipsis").font(.body.weight(.semibold))
                     .frame(width: 36, height: 36).background(ink.opacity(0.12), in: Circle())
@@ -135,8 +141,9 @@ struct PlayerScreen: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 240)
         } else {
-            Label(player.mode == .live ? "Live from your Mac" : "Offline copy",
-                  systemImage: player.mode == .live ? "dot.radiowaves.left.and.right" : "arrow.down.circle")
+            let away = player.mode == .live && !library.reachable
+            Label(away ? "Saved on this iPhone" : player.mode == .live ? "Live from your Mac" : "Offline copy",
+                  systemImage: away ? "iphone" : player.mode == .live ? "dot.radiowaves.left.and.right" : "arrow.down.circle")
                 .font(.caption.weight(.semibold)).textCase(.uppercase)
                 .padding(.horizontal, 10).padding(.vertical, 5)
                 .background(ink.opacity(0.12), in: Capsule())
@@ -228,6 +235,11 @@ struct PlayerScreen: View {
                 player.play(from: s)
             },
         ]
+        items.append(UIAction(title: "Read This Line Again", subtitle: player.canChangeSpeakers ? nil : "When your Mac is near",
+                              image: UIImage(systemName: "arrow.counterclockwise"), attributes: player.canChangeSpeakers ? [] : .disabled) { _ in
+            following = true
+            Task { await player.readAgain(segment: s) }
+        })
         if line.dialogue {
             let who = player.name(of: line.speaker) ?? "Unknown speaker"
             if player.canChangeSpeakers {
@@ -366,6 +378,7 @@ struct PlayerScreen: View {
             case "chapter": player.goTo(chapter: Int(step[1]) ?? 0)
             case "wait": try? await Task.sleep(for: .seconds(Double(step[1]) ?? 1))
             case "away": following = false
+            case "again": await player.readAgain(segment: Int(step[1]) ?? 0)
             case "who": await player.setSpeaker(step[2] == "-" ? nil : String(step[2]), segment: Int(step[1]) ?? 0)
             default: break
             }

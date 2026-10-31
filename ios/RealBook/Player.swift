@@ -79,6 +79,7 @@ final class Player {
     private var playTask: Task<Void, Never>?
     private var gapTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
+    private var lastMoved = 0.0  // when the reader last moved here, to tell if the Mac's position is newer
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
@@ -105,6 +106,7 @@ final class Player {
     /// Opens a book: its offline copy if this iPhone has one, else live from the Mac.
     func open(_ id: String, library: Library, play start: Bool = false) {
         self.library = library
+        library.listening = id
         guard bookID != id else {
             if start && !playing { play() }
             return
@@ -135,7 +137,9 @@ final class Player {
             Task {
                 if library.remoteBook(id) == nil { await library.sync() }
                 guard bookID == id else { return }
+                library.keep(id)
                 let at = library.remoteBook(id)?.position
+                lastMoved = at?.updated ?? 0
                 await startLive(at: at?.chapter ?? 0, segment: at?.segment ?? 0)
             }
         }
@@ -214,11 +218,21 @@ final class Player {
         loading = true
         defer { loading = false }
         do {
-            let book = try await library.mac.book(id)
+            let saved = library.kept.book(id)
+            let book: MacBook
+            if let saved { book = saved } else { book = try await library.mac.book(id) }
             guard bookID == id else { return }
             macBook = book
             title = book.title
             chapterTitles = book.toc.map(\.title)
+            if saved != nil {
+                Task {  // what's saved shows at once; the Mac may have newer details
+                    if let fresh = try? await library.mac.book(id), bookID == id, mode == .live {
+                        macBook = fresh
+                        chapterTitles = fresh.toc.map(\.title)
+                    }
+                }
+            }
             try await loadChapter(chapter, at: segment)
             if playWhenLoaded { play() }
         } catch {
@@ -228,8 +242,17 @@ final class Player {
     }
 
     private func loadChapter(_ n: Int, at seg: Int) async throws {
-        guard let id = bookID else { return }
-        let ch = try await library!.mac.chapter(n, of: id)
+        guard let id = bookID, let library else { return }
+        let ch: MacChapter
+        if let saved = library.kept.chapter(n, of: id) {
+            ch = saved
+        } else {
+            do {
+                ch = try await library.mac.chapter(n, of: id)
+            } catch MacError.unreachable where library.kept.has(id) {
+                throw MacError.notSaved
+            }
+        }
         guard bookID == id, mode == .live else { return }
         chapter = n
         segments = ch.segments
@@ -337,7 +360,12 @@ final class Player {
             let wasPlaying = playing
             pause()
             Task {
-                do { try await loadChapter(n, at: 0) } catch { problem = error.localizedDescription }
+                do {
+                    try await loadChapter(n, at: 0)
+                } catch {
+                    problem = error.localizedDescription  // stays where it was, paused, with the reason showing
+                    return
+                }
                 saveLivePosition()
                 if wasPlaying { play() }
             }
@@ -442,13 +470,23 @@ final class Player {
         let k = key(c, s)
         if let data = lines[k] { return data }
         if let task = fetching[k] { return try await task.value }
-        guard let id = bookID, let mac = library?.mac else { throw MacError.notPaired }
+        guard let id = bookID, let library else { throw MacError.notPaired }
+        if let saved = library.kept.audio(chapter: c, segment: s, of: id) {
+            lines[k] = saved
+            return saved
+        }
+        let mac = library.mac
         let task = Task { try await mac.line(s, chapter: c, of: id, ahead: ahead) }
         fetching[k] = task
         defer { fetching[k] = nil }
-        let data = try await task.value
-        lines[k] = data
-        return data
+        do {
+            let data = try await task.value
+            lines[k] = data
+            library.kept.store(data, chapter: c, segment: s, of: id)
+            return data
+        } catch MacError.unreachable where library.kept.has(id) {
+            throw MacError.notSaved
+        }
     }
 
     private func playLiveLine() {
@@ -545,7 +583,20 @@ final class Player {
         current = spoken(segments[segment])
     }
 
+    /// The position moved on the Mac: follow it, unless this iPhone is playing or moved since.
+    func follow(remote r: RemoteBook) {
+        guard r.id == bookID, mode == .live, !playing, !loading, (r.position.updated ?? 0) > lastMoved + 1,
+              r.position.chapter != chapter || r.position.segment != segment else { return }
+        lastMoved = r.position.updated ?? 0
+        Task {
+            live?.stop()
+            liveKey = ""
+            try? await loadChapter(r.position.chapter, at: r.position.segment)
+        }
+    }
+
     private func saveLivePosition() {
+        lastMoved = Date().timeIntervalSince1970
         saveTask?.cancel()
         let c = chapter, s = segment
         saveTask = Task {
@@ -584,6 +635,12 @@ final class Player {
         return macBook?.colors[id] ?? timeline?.colors?[id]
     }
 
+    /// How much of what's next is on this iPhone, when listening without an offline copy.
+    var savedNote: String? {
+        guard mode == .live, let bookID else { return nil }
+        return library?.kept.note(chapter: chapter, segment: segment, of: bookID)
+    }
+
     /// Changing who says a line needs the Mac.
     var canChangeSpeakers: Bool { library?.reachable == true && macBook != nil }
 
@@ -599,6 +656,7 @@ final class Player {
             case .live:
                 for i in r.changed where segments.indices.contains(i) { segments[i].speaker = speaker }
                 for i in r.changed { lines[key(ci, i)] = nil }
+                library.kept.forget(chapter: ci, segments: r.changed, of: id)
                 page = segments.map { PageLine(segment: $0.id, text: $0.text, para: $0.para, dialogue: $0.kind == "dialogue", q: $0.q, speaker: $0.speaker) }
                 revision += 1
                 showLiveLine()
@@ -616,7 +674,44 @@ final class Player {
         }
     }
 
-    func dismissNotice() { notice = nil }
+    /// A new reading of one line (the one being read, unless another is named), which then plays:
+    /// voices read a line a little differently each time.
+    func readAgain(segment s: Int? = nil) async {
+        guard let id = bookID, let library else { return }
+        let target = s ?? segment
+        let ci = mode == .offline ? (timeline.flatMap { $0.chapters.indices.contains(chapter) ? $0.chapters[chapter].chapter : nil } ?? chapter) : chapter
+        if mode == .live {
+            gapTask?.cancel()
+            playTask?.cancel()
+            live?.stop()
+            liveKey = ""
+            segment = target
+            showLiveLine()
+            playing = true
+            loading = true
+        }
+        do {
+            try await library.mac.readAgain(chapter: ci, segment: target, of: id)
+            guard bookID == id else { return }
+            library.kept.forget(chapter: ci, segments: [target], of: id)
+            if mode == .live {
+                lines[key(ci, target)] = nil
+                saveLivePosition()
+                if segment == target && chapter == ci { playLiveLine() }
+            } else {
+                notice = "Read again on your Mac. This iPhone's offline copy keeps the old reading until you download an update; Live from Mac uses the new one."
+            }
+        } catch {
+            loading = false
+            problem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if mode == .live { pause() }
+        }
+    }
+
+    func dismissNotice() {
+        notice = nil
+        problem = nil
+    }
 
     /// A character's voice, saying one of their lines from this chapter.
     func sample(_ member: CastMember) {
@@ -675,7 +770,8 @@ final class Player {
     /// Where playback is, for the simulator's test scripts.
     var debugState: String {
         let at = mode == .live ? (live?.currentTime ?? -1) : Double(ms) / 1000
-        return "mode=\(mode.rawValue) playing=\(playing) chapter=\(chapter) segment=\(segment) line=\(liveKey) at=\(String(format: "%.2f", at))"
+        let saved = bookID.map { library?.kept.wordsAhead(chapter: chapter, segment: segment, of: $0) ?? 0 } ?? 0
+        return "mode=\(mode.rawValue) playing=\(playing) chapter=\(chapter) segment=\(segment) line=\(liveKey) at=\(String(format: "%.2f", at)) savedWords=\(saved) reachable=\(library?.reachable ?? false) problem=\(problem ?? "-")"
     }
     #endif
 

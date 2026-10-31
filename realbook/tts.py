@@ -65,10 +65,8 @@ def _clean(text: str) -> str:
     return abbrev.expand(" ".join(text.split()))
 
 
-def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: int, urgent: bool = True,
-               style: str = "") -> Path:
-    """Render `text` to an audio file (once) and return its path. `style` is how the narration says the
-    line is spoken ("quiet", "loud", "upset"); voices that can't do it read it as usual."""
+def _resolve(text: str, voice: str, style: str) -> tuple[str, str, str]:
+    """What will really be read: the voice to read it if this one was removed, and the style if it can do it."""
     text = _clean(text)
     engine = designed.engine_of(voice)
     if engine and not designed.installed(engine):
@@ -77,7 +75,32 @@ def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: i
         voice = system.default_voice()  # natural voices were removed; keep reading with a system voice
     if not (designed.supports(voice, style) or (style == "quiet" and voice.startswith("kokoro:"))):
         style = ""  # same audio as usual, so the same cached file
-    key = hashlib.sha1(f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}{'|' + designed.style_tag(style) if style else ''}".encode()).hexdigest()
+    return text, voice, style
+
+
+def _key(text: str, voice: str, rate: int, pitch_shift: int, style: str, take: int) -> str:
+    return hashlib.sha1((f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}{'|' + designed.style_tag(style) if style else ''}"
+                         f"{f'|take{take}' if take else ''}").encode()).hexdigest()
+
+
+def can_vary(voice: str) -> bool:
+    """Designed voices read a line differently each time; the others always the same."""
+    return bool(designed.engine_of(_resolve("", voice, "")[1]))
+
+
+def audio_path(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: int, style: str = "", take: int = 0) -> Path:
+    """Where this line's audio is, or will be once it's made."""
+    text, voice, style = _resolve(text, voice, style)
+    return cache_dir / f"{_key(text, voice, rate, pitch_shift, style, take)}{system.AUDIO_EXT}"
+
+
+def synthesize(cache_dir: Path, text: str, voice: str, rate: int, pitch_shift: int, urgent: bool = True,
+               style: str = "", take: int = 0) -> Path:
+    """Render `text` to an audio file (once) and return its path. `style` is how the narration says the
+    line is spoken ("quiet", "loud", "upset"); voices that can't do it read it as usual. `take` above 0
+    is another reading of the line (Read Again)."""
+    text, voice, style = _resolve(text, voice, style)
+    key = _key(text, voice, rate, pitch_shift, style, take)
     out = cache_dir / f"{key}{system.AUDIO_EXT}"
     if out.exists():
         return out

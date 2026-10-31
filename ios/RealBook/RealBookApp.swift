@@ -16,7 +16,10 @@ struct RealBookApp: App {
                 .environment(look)
                 .task { await syncNow() }
                 .onChange(of: phase) { _, now in
-                    if now == .active { Task { await syncNow() } }
+                    if now == .active {
+                        library.mac.finder.start()  // it stops looking while the app is away
+                        Task { await syncNow() }
+                    }
                 }
         }
     }
@@ -26,6 +29,7 @@ struct RealBookApp: App {
         for id in moved {
             if let b = library.book(id) { player.follow(b) }
         }
+        if let id = player.bookID, let r = library.remoteBook(id) { player.follow(remote: r) }
         if library.reachable && !lookAsked, let mac = try? await library.mac.appearance() {
             lookAsked = true
             look.adopt(mac: mac)  // the Mac's reading look, until one is picked here

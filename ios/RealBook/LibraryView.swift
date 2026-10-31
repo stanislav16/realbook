@@ -181,8 +181,8 @@ struct LibraryView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: library.reachable ? "checkmark.circle" : "wifi.exclamationmark")
             Text(library.reachable
-                 ? "Connected to your Mac. Tap a book to listen live, or hold it to download its offline copy for listening anywhere."
-                 : library.lastError ?? "Looking for your Mac…")
+                 ? "Connected to your Mac. The next hours of the book you're listening to are saved here by themselves, for when you leave."
+                 : "Your Mac isn't near. You can keep listening to what's saved on this iPhone.")
         }
         .font(.footnote).foregroundStyle(.secondary)
     }
@@ -282,6 +282,7 @@ struct ShelfTile: View {
         }
         if let r = book.remote, book.local != nil, library.hasUpdate(r) { return "Update available" }
         if book.local != nil { return "On this iPhone" }
+        if let at = book.remote?.position, let saved = library.kept.note(chapter: at.chapter, segment: at.segment, of: book.id) { return saved }
         return library.reachable ? "Live from your Mac" : "On your Mac"
     }
 }

@@ -148,20 +148,20 @@ def _run(book_id: str) -> None:
     narrator = book["narrator"]
     started = time.monotonic()
 
-    def render(text: str, v: dict, style: str) -> bytes:
+    def render(text: str, v: dict, style: str, take: int) -> bytes:
         if job["cancel"]:
             raise Cancelled
         # Not urgent: if someone is listening at the same time, their lines go first.
-        path = tts.synthesize(audio, store.spoken(book, text), v["voice"], v["rate"], v.get("pitch_shift", 0), urgent=False, style=style)
+        path = tts.synthesize(audio, store.spoken(book, text), v["voice"], v["rate"], v.get("pitch_shift", 0), urgent=False, style=style, take=take)
         return _pcm(path)
 
     try:
-        items = []  # (chapter index, text, voice settings, pause after, style)
+        items = []  # (chapter index, text, voice settings, pause after, style, take)
         where = []  # (segment index or -1 for a heading, speaker id) for each item
         for ci, ch in enumerate(book["chapters"]):
             heading = _spoken_title(ch["title"])
             if heading:
-                items.append((ci, heading, narrator, GAP_TITLE, ""))
+                items.append((ci, heading, narrator, GAP_TITLE, "", 0))
                 where.append((-1, None))
             segs = ch["segments"]
             styles = heuristic.line_styles(segs)
@@ -169,7 +169,7 @@ def _run(book_id: str) -> None:
                 nxt = segs[i + 1] if i + 1 < len(segs) else None
                 pause = GAP_CHAPTER if nxt is None else GAP_PARAGRAPH if nxt["para"] != seg["para"] else GAP_LINE
                 style = styles.get(seg["q"], "") if seg["kind"] == "dialogue" and seg.get("speaker") else ""
-                items.append((ci, heuristic.as_said(segs, seg), store.voice_for(book, seg), pause, style))
+                items.append((ci, heuristic.as_said(segs, seg), store.voice_for(book, seg), pause, style, seg.get("take", 0)))
                 where.append((i, seg.get("speaker") if seg["kind"] == "dialogue" else None))
         job.update(total=len(items), message="Making the audio…")
 
@@ -178,8 +178,8 @@ def _run(book_id: str) -> None:
         lines = []  # [start ms, chapter, segment, speaker id]
         try:
             with ThreadPoolExecutor(4) as pool:  # lines are made in order; decoding overlaps
-                results = pool.map(lambda it: render(it[1], it[2], it[4]), items)
-                for n, ((ci, _, _, pause, _), pcm) in enumerate(zip(items, results), 1):
+                results = pool.map(lambda it: render(it[1], it[2], it[4], it[5]), items)
+                for n, ((ci, _, _, pause, _, _), pcm) in enumerate(zip(items, results), 1):
                     if not chapters or chapters[-1][2] != ci:
                         chapters.append((caf.ms, book["chapters"][ci]["title"] or f"Chapter {ci + 1}", ci))
                     lines.append([caf.ms, ci, *where[n - 1]])

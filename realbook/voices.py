@@ -189,6 +189,9 @@ def cast(characters: list[dict], narrator: dict | None = None) -> tuple[dict, li
     voices = kokoro or apple
     accents_on_apple = store.settings().get("apple_for_accents", True)
     narrator = narrator or {}
+    if not voices:  # Linux, before natural voices are downloaded: everyone is cast when they arrive (store.recast_all)
+        return ({"rate": DEFAULT_RATE, "pitch_shift": 0, **narrator, "voice": narrator.get("voice", "")},
+                [{"rate": DEFAULT_RATE, "pitch_shift": 0, **c, "voice": c.get("voice", "")} for c in characters])
     if not (narrator.get("locked") and narrator.get("voice")):
         # voice_description/take are for designed voices; teller and gender are who tells the book
         kept = {k: narrator[k] for k in ("voice_description", "voice_take", "teller", "gender", "profiled_by") if k in narrator}

@@ -271,28 +271,41 @@ final class Player {
 
     func play() {
         problem = nil
-        try? AVAudioSession.sharedInstance().setActive(true)
         switch mode {
         case .offline:
             guard offline.currentItem != nil else { return }
-            offline.playImmediately(atRate: speed)
-            playing = true
         case .live:
             guard !segments.isEmpty else {
                 playWhenLoaded = loading
                 return
             }
-            playing = true
-            if let live, liveKey == key(chapter, segment), live.currentTime > 0 {
-                live.rate = speed
-                live.play()  // carry on where the line was paused
-            } else {
-                playLiveLine()
-            }
         }
+        playing = true
         sampler?.stop()
         sampling = nil
         updateNowPlaying()
+        Task {
+            await activateAudio()
+            guard playing else { return }  // paused meanwhile
+            switch mode {
+            case .offline:
+                offline.playImmediately(atRate: speed)
+            case .live:
+                if let live, liveKey == key(chapter, segment), live.currentTime > 0 {
+                    live.rate = speed
+                    live.play()  // carry on where the line was paused
+                } else {
+                    playLiveLine()
+                }
+            }
+        }
+    }
+
+    /// Off the main thread: it can take long enough to make the screen stutter.
+    private func activateAudio() async {
+        await Task.detached(priority: .userInitiated) {
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }.value
     }
 
     func pause() {
@@ -698,6 +711,7 @@ final class Player {
             showLiveLine()
             playing = true
             loading = true
+            await activateAudio()
         }
         do {
             try await library.mac.readAgain(chapter: ci, segment: target, of: id)
@@ -738,7 +752,7 @@ final class Player {
             do {
                 let data = try await library.mac.sample(v, text: said)
                 guard sampling == member.id, bookID == id else { return }
-                try? AVAudioSession.sharedInstance().setActive(true)
+                await activateAudio()
                 let p = try AVAudioPlayer(data: data)
                 p.delegate = sampleDone
                 p.volume = Self.volume

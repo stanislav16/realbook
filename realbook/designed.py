@@ -730,7 +730,7 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
             samples = samples * 10 ** (-over / 20)
     with tempfile.NamedTemporaryFile(suffix=".wav", dir=out.parent, delete=False) as tmp:
         wav = Path(tmp.name)
-    _write_wav(wav, _tidy_ends(samples))
+    _write_wav(wav, _tidy_ends(_longer_pauses(samples, text)))
     system.encode(wav, out, SAMPLE_RATE)
 
 
@@ -783,6 +783,81 @@ def _end_rise(samples: np.ndarray) -> float:
     t, p = np.array(times), np.array(pitches)
     last, before = p[t > t[-1] - 10], p[(t <= t[-1] - 10) & (t > t[-1] - 40)]
     return float(np.median(last) / np.median(before)) if len(before) >= 5 else 1.0
+
+
+# "…" written as ". . ." stops the voice skipping the pause (a third of readings had none); it still
+# doesn't pause for long, so the silence it leaves is lengthened. This beat reading the line in pieces
+# in a blind test.
+DOTS = re.compile(r"\s*(?:…|\.\s?\.\s?\.)\.?\s*")
+SPACED_DOTS = ". . ."
+DOTS_PAUSE, DOTS_TAIL = 0.65, 0.45  # seconds at dots in a line, and after dots ending one
+
+
+def spaced_dots(text: str) -> str:
+    """`text` with its dots written the way the voice pauses at them. Dots starting a line aren't read."""
+    if "…" not in text and ". ." not in text and "..." not in text:
+        return text
+    return DOTS.sub(SPACED_DOTS + " ", DOTS.sub("", text, count=1) if DOTS.match(text) else text).strip()
+
+
+def _longer_pauses(samples: np.ndarray, text: str) -> np.ndarray:
+    """Lengthens the silence the voice left nearest each dots in `text`, as far as it's found one."""
+    if SPACED_DOTS not in text:
+        return samples
+    plain = text.replace(SPACED_DOTS, "…")
+    ends = bool(re.search(r"…\s*[\"”’')\]?!]*\s*$", plain))
+    frame = SAMPLE_RATE // 50
+    n = len(samples) // frame
+    if n < 5:
+        return samples
+    rms = np.sqrt(np.mean(samples[:n * frame].reshape(n, frame) ** 2, axis=1))
+    on = rms > rms.max() * 0.03
+    voiced = np.where(on)[0]
+    if not len(voiced):
+        return samples
+    first, last = int(voiced[0]), int(voiced[-1])
+    gaps: list[tuple[int, int]] = []
+    i = first
+    while i <= last:
+        if on[i]:
+            i += 1
+            continue
+        j = i
+        while j <= last and not on[j]:
+            j += 1
+        gaps.append((i, j))
+        i = j
+    chosen: dict[tuple[int, int], float] = {}
+    reach = max(0.2 * (last - first), 25)  # on a short line, a word can take up much of it: half a second either way
+    for m in re.finditer("…", plain):
+        if not plain[m.end():].strip(" .?!\"”’')]"):
+            continue
+        want = first + m.start() / len(plain) * (last - first)
+        near = [g for g in gaps if abs((g[0] + g[1]) / 2 - want) < reach]
+        if near:
+            gap = min(near, key=lambda g: abs((g[0] + g[1]) / 2 - want))
+        else:  # it ran straight on: the quietest moment around there
+            low, high = max(first + 1, int(want - reach)), min(last, int(want + reach))
+            if high <= low:
+                continue
+            quiet = low + int(np.argmin(rms[low:high]))
+            gap = (quiet, quiet)
+        chosen[gap] = DOTS_PAUSE - (gap[1] - gap[0]) * frame / SAMPLE_RATE
+    parts, at = [], 0
+    edge = np.linspace(1, 0, SAMPLE_RATE // 100, dtype=np.float32)  # 10 ms, so it doesn't click
+    for gap, add in sorted(chosen.items()):
+        if add > 0:
+            middle = (gap[0] + gap[1]) // 2 * frame
+            before, after = samples[at:middle].copy(), samples[middle:].copy()
+            if len(before) > len(edge) and len(after) > len(edge):
+                before[-len(edge):] *= edge
+                after[:len(edge)] *= edge[::-1]
+            parts += [before, np.zeros(int(add * SAMPLE_RATE), np.float32)]
+            samples, at = np.concatenate([samples[:middle], after]), middle
+    parts.append(samples[at:])
+    if ends:
+        parts.append(np.zeros(int(DOTS_TAIL * SAMPLE_RATE), np.float32))
+    return np.concatenate(parts)
 
 
 def _tidy_ends(samples: np.ndarray) -> np.ndarray:

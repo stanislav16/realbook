@@ -75,6 +75,8 @@ def _resolve(text: str, voice: str, style: str) -> tuple[str, str, str]:
         voice = system.default_voice()  # natural voices were removed; keep reading with a system voice
     if not (designed.supports(voice, style) or (style == "quiet" and voice.startswith("kokoro:"))):
         style = ""  # same audio as usual, so the same cached file
+    if designed.engine_of(voice):
+        text = designed.spaced_dots(text)
     return text, voice, style
 
 

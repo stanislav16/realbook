@@ -176,7 +176,7 @@ body.native.mac .reader-toolbar { padding-left: 84px; }  /* room for the window 
 .panel.right { right: 0; width: 360px; max-width: 100%; border-left: .5px solid var(--page-line); transform: translateX(102%); }
 .reader.show-toc .panel.left, .reader.show-cast .panel.right { visibility: visible; transform: none; }
 body.native.mac .panel.left .panel-head { padding-top: 52px; }  /* under the window buttons */
-.panel-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 10px 12px 10px 16px; font-size: 15px; font-weight: 700; background: inherit; }
+.panel-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 10px 12px 10px 16px; font-size: 15px; font-weight: 700; background: inherit; }
 .cast-actions { display: flex; align-items: center; gap: 6px; }
 .round-btn.small { width: 24px; height: 24px; }
 .round-btn.small svg { width: 14px; height: 14px; }
@@ -187,7 +187,10 @@ body.native.mac .panel.left .panel-head { padding-top: 52px; }  /* under the win
 .toc-list button.current { background: color-mix(in srgb, var(--accent) 22%, transparent); font-weight: 600; }
 .toc-part { margin-top: 10px; }
 .toc-part:first-child { margin-top: 0; }
-.toc-list .toc-section { position: sticky; top: var(--toc-head, 52px); z-index: 1; font-weight: 700; background: color-mix(in srgb, var(--page-bg) 94%, var(--page-ink)); }
+/* Solid, as chapters scroll under it; below the panel's title, which it scrolls under in turn. */
+.toc-list button.toc-section { position: sticky; top: var(--toc-head, 52px); z-index: 1; font-weight: 700; background: color-mix(in srgb, var(--page-bg) 94%, var(--page-ink)); }
+.toc-list button.toc-section:hover { background-image: linear-gradient(color-mix(in srgb, var(--page-ink) 7%, transparent) 0 0); }
+.toc-list button.toc-section.current { background-image: linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 0 0); }
 .toc-list button.nested { padding-left: 24px; }
 .page-section { margin: 2.6em 0 -1.2em; text-align: center; font: 500 .7em/1.4 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--page-muted); opacity: .8; }
 

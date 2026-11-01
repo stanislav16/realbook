@@ -264,7 +264,7 @@ def get_chapter(book_id: str, n: int):
     b = _book(book_id)
     ch = _chapter(b, n)
     if voices.designed_engine():
-        # Whispered or shouted lines are read from a second sample designed that way: make those before they're reached.
+        # Shouted or upset lines are read from a second sample designed that way: make those before they're reached.
         styles = heuristic.line_styles(ch["segments"])
         voice_of = {c["id"]: c["voice"] for c in b["characters"]}
         designed.design_styles_ahead(sorted({(voice_of[s["speaker"]], styles[s["q"]]) for s in ch["segments"]

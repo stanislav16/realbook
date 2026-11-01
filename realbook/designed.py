@@ -59,11 +59,6 @@ REFERENCE_TEXT = ("I have been thinking about it all morning, and I suppose I sh
 # What voices designed before that change say in their sample; they're still cloned with it.
 CALM_REFERENCE_TEXT = ("I have been thinking about it all morning, and I suppose there is no better time to tell you. "
                        "Some things are easier to say out loud than to keep to yourself.")
-# Lines the narration says are whispered or muttered are read from a second sample of the same
-# description, designed whispering: the clone copies a sample's energy, so this one reads them
-# hushed. (Cloning the usual sample with hushed words didn't change how loud lines came out.)
-QUIET_REFERENCE_TEXT = ("Shh, keep your voice down. They are sleeping in the next room, so we must be very quiet. "
-                        "Come closer, and I will tell you.")
 ACCENT_WORDS = {"south_african": "South African"}
 TIMBRES = ["bright", "clear", "expressive", "lively", "crisp", "slightly raspy"]
 # Files the Qwen models share byte for byte (tokenizers and the audio codec).
@@ -93,7 +88,7 @@ class Engine:
     read_many: Callable  # (model, texts, reference clip, what the clip says) -> generator of numbered audio chunks
     speed_note: str = ""
     design_version: int = 1  # bump when design settings change, so voices are designed again
-    styles: tuple[str, ...] = ("quiet",)  # ways of speaking it can do (see STYLES)
+    styles: tuple[str, ...] = ()  # ways of speaking it can do (see STYLES)
     fingerprint: bool = False  # cloning takes a separate speaker fingerprint (Style.keep_voice)
     install: dict = field(default_factory=lambda: {"state": "idle", "progress": 0.0, "message": ""})
 
@@ -128,7 +123,10 @@ QWEN = Engine(
     read=lambda m, text, ref, ref_text: m.generate(text=text, ref_audio=str(ref), ref_text=ref_text, lang_code="english"),
     read_many=lambda m, texts, ref, ref_text: m.batch_generate(texts=texts, ref_audio=str(ref), ref_text=ref_text, lang_code="english"),
     design_version=3,  # 2: an expressive sample; 3: a moderate one
-    styles=("quiet", "loud", "upset"),
+    # Not "quiet": a sample designed whispering or muttering always made someone else of the voice, however
+    # closely it was chosen and checked, so those lines are read in the usual voice (a blind test preferred
+    # that to the usual voice softened or read from the calm part of its sample).
+    styles=("loud", "upset"),
     fingerprint=True,
     speed_note="About twice as fast as listening on a recent Mac.",
 )
@@ -288,6 +286,8 @@ def describe_character(char: dict) -> str:
             parts.append("aged")
     if gender == "male":
         parts = [re.sub(r"\bbright\b", "clear", p) for p in parts]  # "bright" makes men's voices higher
+        if age != "child":
+            parts = [re.sub(r"\blively\b", "clear", p) for p in parts]  # 2 of 8 "lively" men fit, 5 of 8 "clear" ones
         parts.append("boyish" if age == "child" else "masculine")
     elif age == "old":
         pass  # "clear" makes old women sound young; "dry, weathered … shaky with age" won a listening test
@@ -306,7 +306,7 @@ def describe_character(char: dict) -> str:
         text = f"{who} with {voice} and {'an' if word[0] in 'AEIOU' else 'a'} {word} accent"
     # How they speak is left neutral: manners in the description ("with mocking, venomous glee") made
     # the designer act every line, and men came out cocky, shouting cartoon knights. A character
-    # sounds whispered, shouted or upset only on the lines the book says so (see STYLES).
+    # sounds shouted or upset only on the lines the book says so (see STYLES).
     speed = {-1: "slowly, ", 1: "quickly, "}.get(char.get("pace", 0), "")
     return f"{text}, speaking {speed}naturally and conversationally."
 
@@ -475,23 +475,42 @@ def _write_wav(path: Path, samples: np.ndarray) -> None:
 # one of the character's lines then copies: Duke Leto, a "deep" man, got 205 Hz with a wide swing and
 # sounded like he was shouting, while 15 more designs of him came out at 76-129 Hz.
 DESIGN_RETRIES = 3
-MAX_MAN_HZ, MAX_YOUNG_MAN_HZ = 150, 180
+MAX_MAN_HZ, MAX_YOUNG_MAN_HZ, MAX_HIGH_MAN_HZ = 150, 180, 200
 MAX_SWING = 2.8  # the top of the voice's pitch over the bottom
+# A man whose voice is this strained sounds like he's shouting, however quiet he is: Dr. Yueh (-3.8,
+# "thin, high-pitched") did, and of Dune's other men only Gurney (-3.5) comes near. Kynes (-6.4) is fine.
+MAX_STRAIN = -6.0
+
+
+def _strain(samples: np.ndarray) -> float:
+    """How much of a voice's strength is high up, in dB: 1-4 kHz against 80 Hz-1 kHz. Effort raises it."""
+    n, hop = 2048, 512
+    frames = np.array([samples[i:i + n] * np.hanning(n) for i in range(0, len(samples) - n, hop)])
+    if not len(frames):
+        return -100.0
+    energy = np.sqrt(np.mean(frames ** 2, axis=1))
+    power = np.mean(np.abs(np.fft.rfft(frames[energy > 0.3 * np.median(energy[energy > 0])], axis=1)) ** 2, axis=0)
+    hz = np.fft.rfftfreq(n, 1 / SAMPLE_RATE)
+    return float(10 * np.log10(power[(hz >= 1000) & (hz < 4000)].sum() / (power[(hz >= 80) & (hz < 1000)].sum() + 1e-12)))
 
 
 def _voice_fits(samples: np.ndarray, description: str) -> bool:
-    """Whether a man's voice is about where it should be. Old voices are left alone, since gravel
-    throws the pitch finder off; so are voices asked to be high, boys' and women's."""
+    """Whether a man's voice is about where it should be and doesn't sound shouted. Old voices only
+    get the second check, since gravel throws the pitch finder off; boys' and women's are left alone."""
     words = description.lower()
-    man = re.search(r"\b(adult|young|middle-aged) man\b", words)
-    if not man or re.search(r"\bhigh\b", words):
+    man = re.search(r"\b(adult|young|middle-aged|elderly) man\b", words)
+    if not man:
+        return True
+    if _strain(samples) > MAX_STRAIN:
+        return False
+    if man.group(1) == "elderly":
         return True
     n = 2048
     found = [_pitch(samples[i:i + n]) for i in range(0, max(1, len(samples) - n), SAMPLE_RATE // 25)]
     found = [p for p in found if p > 0]
     if not found:
         return False
-    limit = MAX_YOUNG_MAN_HZ if man.group(1) == "young" else MAX_MAN_HZ
+    limit = MAX_HIGH_MAN_HZ if re.search(r"\bhigh\b", words) else MAX_YOUNG_MAN_HZ if man.group(1) == "young" else MAX_MAN_HZ
     return np.median(found) <= limit and np.percentile(found, 90) / np.percentile(found, 10) <= MAX_SWING
 
 
@@ -508,7 +527,9 @@ def _design(engine: Engine, key: str) -> Path:
     for _ in range(DESIGN_RETRIES):
         if _voice_fits(samples, info["description"]):
             break
-        samples = _generate(engine.design(model, info["description"]))
+        again = _generate(engine.design(model, info["description"]))
+        if _voice_fits(again, info["description"]) or _strain(again) < _strain(samples):
+            samples = again
     _last_design = time.monotonic()
     info["reference_text"] = REFERENCE_TEXT  # cloning must use exactly what the sample says
     info_path.write_text(json.dumps(info))
@@ -540,10 +561,6 @@ class Style:
     # Keep the usual sample's speaker fingerprint and take only the delivery from the styled one:
     # otherwise shouting or crying sounds like someone else (Qwen only).
     keep_voice: bool = False
-    # Clone from the usual sample followed by the styled one, rather than the styled one alone. For
-    # whispers the fingerprint by itself wasn't enough (Piter came out shouting); joined, a listening
-    # test heard Jessica whisper in her own voice.
-    join: bool = False
     deep_ending: str = ""  # used instead of `ending` for voices described as deep
     # Each line is checked against the usual voice: no more than `max_rise` times higher, and the
     # same speaker by fingerprint (at least `min_likeness`). A line that fails is made again; if no
@@ -556,14 +573,6 @@ class Style:
 
 
 STYLES = {
-    # Whispered samples came out anywhere from half to 1.5 times the voice's pitch, so muttered lines
-    # sounded like someone else (the Reverend Mother 1.3-1.6 times higher). In listening tests a
-    # sample "grumbling under her breath" was the most like her: of several designs the one closest
-    # to the usual voice is kept, and each line must stay near the voice's pitch.
-    "quiet": Style(", grumbling quietly under {their} breath.", QUIET_REFERENCE_TEXT, attempts=6,
-                   score=lambda s, usual, likeness: min(likeness - 0.975, 0.15 - abs(np.log2(_pitch_rise(s, usual)))),
-                   keep_voice=True, join=True, check_line=True, max_rise=1.2, min_likeness=0.97,
-                   keep_likeness=0.955, version=2),  # Leto's muttering, a little deeper than him (0.96), was liked
     # Shouting samples came out two to three times higher than the voice (the Baron's 90 Hz voice
     # shouted at 300 Hz, like someone else): a sample must be at least 3 dB louder and at most
     # 1.8 times higher, and deep voices are asked to bellow instead.
@@ -575,11 +584,10 @@ STYLES = {
                    "Please, please don't go. I can't do this without you. I'm so sorry, I never meant for any of this to happen.",
                    keep_voice=True, check_line=True),
 }
-QUIET_DB = 6  # whispered lines are at least this much quieter than the voice's usual sample
 
 
 def style_description(description: str, style: str) -> str:
-    """The same voice in another mood: "An adult woman with a clear, poised voice, whispering quietly and secretively." """
+    """The same voice in another mood: "An adult woman with a clear, poised voice, shouting loudly and forcefully." """
     first = description.split(". ")[0].split(", speaking")[0].rstrip(". ")
     how = STYLES[style]
     their = "her" if re.search(r"\b(woman|girl)\b", first) else "his" if re.search(r"\b(man|boy)\b", first) else "their"
@@ -692,12 +700,6 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
     model = _model(engine, engine.read_role)
     if style in engine.styles:
         ref, ref_text = _design_style(engine, key, style), STYLES[style].text
-        if STYLES[style].join and engine.fingerprint:
-            joined = voices_dir(engine) / f"{key}-{style_tag(style)}-joined.wav"
-            if not joined.exists():
-                gap = np.zeros(int(0.4 * SAMPLE_RATE), np.float32)
-                _write_wav(joined, np.concatenate([_read_wav(usual), gap, _read_wav(ref)]))
-            ref, ref_text = joined, f"{info.get('reference_text', CALM_REFERENCE_TEXT)} {ref_text}"
     styled = style in engine.styles and STYLES[style].keep_voice and engine.fingerprint
     usual_text = info.get("reference_text", CALM_REFERENCE_TEXT)
 
@@ -754,10 +756,6 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
         again = generate()
         if faults(again) < faults(samples) and acceptable(again):
             samples = again
-    if style == "quiet" and style in engine.styles:
-        over = _loudness(samples) - (_loudness(_read_wav(usual)) - QUIET_DB)
-        if over > 0:
-            samples = samples * 10 ** (-over / 20)
     with tempfile.NamedTemporaryFile(suffix=".wav", dir=out.parent, delete=False) as tmp:
         wav = Path(tmp.name)
     _write_wav(wav, _tidy_ends(_longer_pauses(samples, text)))
@@ -905,7 +903,7 @@ def _tidy_ends(samples: np.ndarray) -> np.ndarray:
 
 def synthesize(out: Path, text: str, voice: str, urgent: bool = True, style: str = "") -> None:
     """Render `text` in a designed voice to an audio file at `out` (designing the voice first if needed).
-    `style` ("quiet", "loud", "upset") reads it from the voice's sample designed that way."""
+    `style` ("loud", "upset") reads it from the voice's sample designed that way."""
     global _last_line
     _last_line = time.monotonic()
     _submit(URGENT if urgent else PREFETCH, _speak, engine_of(voice), out, text, _key(voice), style).result()
@@ -942,7 +940,7 @@ def _style_in_background(engine: Engine, name: str, style: str) -> None:
 
 
 def design_styles_ahead(wanted: list[tuple[str, str]]) -> None:
-    """Design these (voice, style) samples in the background, before a whispered or shouted line needs one."""
+    """Design these (voice, style) samples in the background, before a shouted or upset line needs one."""
     for name, style in wanted:
         engine = engine_of(name)
         if (engine and style in engine.styles and not _style_path(engine, _key(name), style).exists()

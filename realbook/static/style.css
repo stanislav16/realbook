@@ -302,6 +302,59 @@ dialog p { margin: 0 0 12px; }
 body:has(#reader:not(.hidden)) .toast { bottom: 200px; }
 .toast { position: fixed; left: 50%; bottom: 40px; pointer-events: none; transform: translateX(-50%); padding: 9px 15px; border-radius: 10px; background: rgba(0, 0, 0, .88); box-shadow: 0 0 0 .5px rgba(255, 255, 255, .22), 0 6px 24px rgba(0, 0, 0, .35); color: #fff; z-index: 60; font-size: 13px; max-width: 90vw; backdrop-filter: blur(10px); }
 
+/* Pressing answers at once and lets go softly. Small controls give a little; rows only darken. */
+button { transition: transform .16s ease-out; }
+button:active:not(:disabled) { transform: scale(.96); transition-duration: 0s; }
+.icon:active:not(:disabled) { background-color: var(--fill-strong); }
+.cover:active:not(:disabled) { transform: scale(.985); }
+.menu button:active:not(:disabled), .toc-list button:active:not(:disabled), .nav-item:active:not(:disabled) { transform: none; filter: brightness(.88); }
+.toc-list button:active:not(:disabled) { background-color: color-mix(in srgb, var(--page-ink) 14%, transparent); filter: none; }
+.nav-item:active:not(:disabled) { background-color: var(--fill-strong); filter: none; }
+
+/* Menus grow out of their button, and everything that appears also leaves the way it came. Browsers
+   without these features just show and hide them at once. */
+.menu, .popover { transition: opacity .13s ease-out, transform .13s ease-out, display .13s allow-discrete; }
+.menu.hidden, .popover.hidden { opacity: 0; transform: scale(.97); pointer-events: none; }
+.toast { transition: opacity .2s ease-out, transform .2s ease-out, display .2s allow-discrete; }
+.toast.hidden { opacity: 0; transform: translate(-50%, 6px); }
+dialog { opacity: 0; transform: scale(.97); transition: opacity .18s ease-out, transform .18s ease-out, overlay .18s allow-discrete, display .18s allow-discrete; }
+dialog[open] { opacity: 1; transform: none; }
+dialog::backdrop { opacity: 0; transition: opacity .18s ease-out, overlay .18s allow-discrete, display .18s allow-discrete; }
+dialog[open]::backdrop { opacity: 1; }
+@starting-style {
+  .menu:not(.hidden), .popover:not(.hidden), dialog[open] { opacity: 0; transform: scale(.97); }
+  .toast:not(.hidden) { opacity: 0; transform: translate(-50%, 6px); }
+  dialog[open]::backdrop { opacity: 0; }
+}
+
+/* The system's accessibility settings. */
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+  button:active:not(:disabled), .cover:active:not(:disabled) { transform: none; filter: brightness(.88); }
+  .cover:hover { transform: none; }
+  .menu, .popover { transition-property: opacity, display; }
+  .toast { transition-property: opacity, display; }
+  dialog { transition-property: opacity, overlay, display; }
+  .menu.hidden, .popover.hidden, dialog { transform: none; }
+  .toast.hidden { transform: translateX(-50%); }
+  /* Panels fade in place rather than slide. */
+  .panel, .panel.left, .panel.right { transform: none; opacity: 0; transition: opacity .15s, visibility .15s; }
+  .reader.show-toc .panel.left, .reader.show-cast .panel.right { opacity: 1; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .menu { background: var(--elevated); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .toast { background: #000; }
+  dialog::backdrop { background: rgba(0, 0, 0, .6); }
+}
+@media (prefers-contrast: more) {
+  :root { --secondary: #48484a; --tertiary: #6e6e73; --separator: rgba(0, 0, 0, .4); --control-border: rgba(0, 0, 0, .6); --fill-strong: rgba(0, 0, 0, .18); }
+  #reader { --page-muted: color-mix(in srgb, var(--page-ink) 85%, transparent); --page-line: color-mix(in srgb, var(--page-ink) 50%, transparent); }
+  .icon, .tb-btn, .round-btn { outline: 1px solid color-mix(in srgb, currentColor 35%, transparent); outline-offset: -1px; }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root { --secondary: #c7c7cc; --tertiary: #98989d; --separator: rgba(255, 255, 255, .4); --control-border: rgba(255, 255, 255, .6); --fill-strong: rgba(255, 255, 255, .22); }
+}
+
 @media (max-width: 900px) {
   .library { grid-template-columns: 180px minmax(0, 1fr); }
   #search { width: 140px; }

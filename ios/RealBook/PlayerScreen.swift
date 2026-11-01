@@ -8,6 +8,7 @@ struct PlayerScreen: View {
     @Environment(Player.self) private var player
     @Environment(Look.self) private var look
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let bookID: String
     let close: () -> Void
     @AppStorage("showText") private var showText = false
@@ -17,6 +18,8 @@ struct PlayerScreen: View {
     @State private var followAgain: Task<Void, Never>?
     @State private var sheet: Sheet?
     @State private var showSaved = false
+    @State private var dragY: CGFloat = 0
+    @State private var height: CGFloat = 800
 
     enum Sheet: Identifiable {
         case chapters, look, cast, who(Int)
@@ -38,10 +41,14 @@ struct PlayerScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar.padding(.horizontal, 18).padding(.top, 8)
+                .contentShape(Rectangle())
+                .gesture(closeDrag)
             if showText {
                 page
             } else {
                 coverView.padding(.horizontal, 22)
+                    .contentShape(Rectangle())
+                    .gesture(closeDrag)
             }
             VStack(spacing: 0) {
                 if let message = player.notice ?? player.problem {
@@ -60,6 +67,9 @@ struct PlayerScreen: View {
         .foregroundStyle(ink)
         .tint(ink)
         .environment(\.colorScheme, scheme)
+        .mask { RoundedRectangle(cornerRadius: dragY > 0 ? 28 : 0, style: .continuous).ignoresSafeArea() }
+        .offset(y: dragY)
+        .background(GeometryReader { g in Color.clear.onAppear { height = g.size.height } })
         .animation(.easeInOut(duration: 0.25), value: showText)
         .sheet(item: $sheet) { which in
             Group {
@@ -98,6 +108,39 @@ struct PlayerScreen: View {
                 .overlay(LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.7), .black], startPoint: .top, endPoint: .bottom))
                 .clipped()
                 .ignoresSafeArea()
+        }
+    }
+
+    // MARK: - swipe down to close
+
+    private static let dragStart: CGFloat = 10  // moved this far before it counts as a drag
+
+    /// Follows the finger down. Measured on the screen, since the view moves with the finger.
+    private var closeDrag: some Gesture {
+        DragGesture(minimumDistance: Self.dragStart, coordinateSpace: .global)
+            .onChanged { v in
+                let y = v.translation.height - Self.dragStart
+                dragY = y >= 0 ? y : y * height * 0.55 / (height + 0.55 * abs(y))  // upwards it resists: there's nothing there
+            }
+            .onEnded { v in finishDrag(velocity: v.velocity.height) }
+    }
+
+    /// Closes if the flick would carry it past half way (the way a scroll view coasts), else goes back,
+    /// in both cases carrying on at the finger's speed.
+    private func finishDrag(velocity: CGFloat) {
+        let coast = velocity / 1000 * 0.998 / (1 - 0.998)
+        let closing = dragY + coast > height / 2
+        let target = closing ? height + 60 : 0
+        let distance = target - dragY
+        let spring = Animation.interpolatingSpring(duration: 0.32, bounce: closing || reduceMotion ? 0 : 0.15,
+                                                   initialVelocity: abs(distance) > 1 ? Double(velocity / distance) : 0)
+        withAnimation(spring, completionCriteria: .logicallyComplete) {
+            dragY = target
+        } completion: {
+            guard closing else { return }
+            var quietly = Transaction()
+            quietly.disablesAnimations = true  // it's already off the screen
+            withTransaction(quietly) { close() }
         }
     }
 
@@ -393,6 +436,8 @@ struct PlayerScreen: View {
             case "chapter": player.goTo(chapter: Int(step[1]) ?? 0)
             case "wait": try? await Task.sleep(for: .seconds(Double(step[1]) ?? 1))
             case "away": following = false
+            case "drag": dragY = CGFloat(Double(step[1]) ?? 0)
+            case "release": finishDrag(velocity: CGFloat(Double(step[1]) ?? 0))
             case "again": await player.readAgain(segment: Int(step[1]) ?? 0)
             case "who": await player.setSpeaker(step[2] == "-" ? nil : String(step[2]), segment: Int(step[1]) ?? 0)
             default: break

@@ -63,7 +63,7 @@ struct ChapterPage: UIViewRepresentable {
             }
         }
         c.highlight()
-        if follow && !c.jump { c.scrollToCurrent(animated: true, force: false) }
+        if follow && !c.jump { c.scrollToCurrent(animated: !UIAccessibility.isReduceMotionEnabled, force: false) }
     }
 
     final class Coordinator: NSObject, UITextViewDelegate, UIContextMenuInteractionDelegate {

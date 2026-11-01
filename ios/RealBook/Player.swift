@@ -68,7 +68,13 @@ final class Player {
 
     // MARK: live from the Mac
     private var macBook: MacBook?  // also fetched for an offline copy, for its cast, when the Mac is near
-    private var segments: [MacChapter.Segment] = []
+    private var segments: [MacChapter.Segment] = [] {
+        didSet {  // words from each line to the chapter's end, for the time left
+            var words = 0
+            wordsLeft = segments.reversed().map { words += $0.text.split(whereSeparator: \.isWhitespace).count; return words }.reversed()
+        }
+    }
+    private var wordsLeft: [Int] = []
     private var live: AVAudioPlayer?
     private var liveKey = ""       // the line `live` is playing, to carry on with it after a pause
     private var playWhenLoaded = false
@@ -425,8 +431,15 @@ final class Player {
         case .live:
             let n = max(1, segments.count)
             let at = fraction.map { Int(($0 * Double(n - 1)).rounded()) } ?? segment
-            return ("Line \(at + 1)", "of \(n)")
+            return ("Line \(at + 1) of \(n)", timeLeft(at))
         }
+    }
+
+    /// Lines not made yet have no length, so this goes by words: Dune's voices read 2.65 a second, pauses included.
+    private func timeLeft(_ line: Int) -> String {
+        guard wordsLeft.indices.contains(line) else { return "" }
+        let minutes = Int((Double(wordsLeft[line]) / 2.65 / Double(speed) / 60).rounded())
+        return minutes < 1 ? "Under a minute left" : "About \(minutes) min left"
     }
 
     static func time(_ ms: Int) -> String {

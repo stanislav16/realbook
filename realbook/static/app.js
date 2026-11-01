@@ -158,9 +158,11 @@ function popupMenu(anchor, items, { search = false } = {}) {
   menu.style.left = menu.style.top = "0";  // measured at full width, wherever it last was
   menu.classList.remove("hidden");
   const r = anchor.getBoundingClientRect();
-  menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
-  const below = r.bottom + 4;
-  menu.style.top = `${below + menu.offsetHeight > innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`;
+  const left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8));
+  menu.style.left = `${left}px`;
+  const below = r.bottom + 4, above = below + menu.offsetHeight > innerHeight - 8;
+  menu.style.top = `${above ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`;
+  menu.style.transformOrigin = `${r.left + r.width / 2 - left}px ${above ? "100%" : "0"}`;  // it grows out of its button
   field?.focus();
 }
 function closeMenu() { $("#menu").classList.add("hidden"); S.menuAnchor = null; }
@@ -596,7 +598,7 @@ function scrollToLine(node, jump) {
   // Only the page moves: scrollIntoView would also move anything around it that can scroll.
   const top = Math.max(0, Math.min(page.scrollHeight - page.clientHeight, page.scrollTop + r.top - pr.top - Math.max(40, (pr.height - r.height) * 0.3)));
   clearTimeout(S.scrollCheck);
-  page.scrollTo({ top, behavior: jump ? "auto" : "smooth" });
+  page.scrollTo({ top, behavior: jump || matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   // A smooth scroll can stall, never moving, while the window isn't being drawn (behind another
   // window, say). So if the page hasn't got there shortly after, put it there.
   if (!jump) S.scrollCheck = setTimeout(() => { if (S.following && Math.abs(page.scrollTop - top) > 2) page.scrollTop = top; }, 700);
@@ -676,7 +678,9 @@ function toggleAa(anchor) {
   pop.classList.remove("hidden");
   const r = anchor.getBoundingClientRect();
   pop.style.top = `${r.bottom + 6}px`;
-  pop.style.left = `${Math.min(innerWidth - pop.offsetWidth - 10, r.left + r.width / 2 - pop.offsetWidth / 2)}px`;
+  const left = Math.min(innerWidth - pop.offsetWidth - 10, r.left + r.width / 2 - pop.offsetWidth / 2);
+  pop.style.left = `${left}px`;
+  pop.style.transformOrigin = `${r.left + r.width / 2 - left}px 0`;
   anchor.classList.add("active");
 }
 
@@ -798,14 +802,22 @@ function showScrub(at = null) {
   if (at === null) bar.value = S.segIdx;
   const i = at ?? S.segIdx;
   bar.style.setProperty("--p", `${(100 * i) / Math.max(1, n - 1)}%`);
-  $("#pos-left").textContent = `Line ${i + 1}`;
-  $("#pos-right").textContent = `of ${n}`;
+  $("#pos-left").textContent = `Line ${i + 1} of ${n}`;
+  $("#pos-right").textContent = S.chapter ? timeLeft(S.chapter.segments.slice(i)) : "";
+}
+
+// Lines not made yet have no length, so this goes by words: Dune's voices read 2.65 a second, pauses included.
+function timeLeft(segments) {
+  const words = segments.reduce((sum, s) => sum + s.text.trim().split(/\s+/).length, 0);
+  const minutes = Math.round(words / 2.65 / S.speed / 60);
+  return minutes < 1 ? "Under a minute left" : `About ${minutes} min left`;
 }
 
 function setSpeed(v) {
   S.speed = v;
   S.audio.defaultPlaybackRate = S.audio.playbackRate = v;
   $("#speed-label").textContent = `${v}×`;
+  showScrub();
 }
 
 // Stops playing after a while, or at the end of the chapter.

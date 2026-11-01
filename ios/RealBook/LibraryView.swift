@@ -99,7 +99,10 @@ struct LibraryView: View {
             }
             .navigationTitle("RealBook")
             .searchable(text: $search, prompt: "Search")
-            .fullScreenCover(item: $open) { book in PlayerScreen(bookID: book.id) { open = nil } }
+            .fullScreenCover(item: $open) { book in
+                PlayerScreen(bookID: book.id) { open = nil }
+                    .presentationBackground(.clear)  // the library shows behind it while it's dragged down
+            }
             .refreshable { await library.sync() }
             .toolbar {
                 if library.paired {

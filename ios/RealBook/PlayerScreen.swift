@@ -20,6 +20,7 @@ struct PlayerScreen: View {
     @State private var showSaved = false
     @State private var dragY: CGFloat = 0
     @State private var height: CGFloat = 800
+    @State private var waiting = false
 
     enum Sheet: Identifiable {
         case chapters, look, cast, who(Int)
@@ -67,7 +68,6 @@ struct PlayerScreen: View {
         .foregroundStyle(ink)
         .tint(ink)
         .environment(\.colorScheme, scheme)
-        .mask { RoundedRectangle(cornerRadius: dragY > 0 ? 28 : 0, style: .continuous).ignoresSafeArea() }
         .offset(y: dragY)
         .background(GeometryReader { g in Color.clear.onAppear { height = g.size.height } })
         .animation(.easeInOut(duration: 0.25), value: showText)
@@ -95,7 +95,7 @@ struct PlayerScreen: View {
 
     @ViewBuilder private var background: some View {
         if showText {
-            Color(look.current.background).ignoresSafeArea()
+            Color(look.current.background).clipShape(dragShape).ignoresSafeArea()
         } else {
             // The cover, blurred, behind everything. In an overlay, so its size doesn't widen the page.
             Color.black
@@ -106,12 +106,15 @@ struct PlayerScreen: View {
                     }
                 }
                 .overlay(LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.7), .black], startPoint: .top, endPoint: .bottom))
-                .clipped()
+                .clipShape(dragShape)
                 .ignoresSafeArea()
         }
     }
 
     // MARK: - swipe down to close
+
+    /// Only the background is rounded: a mask over the whole screen made every press and update slow to draw.
+    private var dragShape: RoundedRectangle { RoundedRectangle(cornerRadius: dragY > 0 ? 28 : 0, style: .continuous) }
 
     private static let dragStart: CGFloat = 10  // moved this far before it counts as a drag
 
@@ -171,7 +174,7 @@ struct PlayerScreen: View {
             }
             .accessibilityLabel("More")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
     }
 
     /// Offline copy or live from the Mac, when both are possible.
@@ -273,7 +276,7 @@ struct PlayerScreen: View {
                             .padding(.horizontal, 14).padding(.vertical, 8)
                             .background(.regularMaterial, in: Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .padding(.bottom, 10)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
@@ -340,7 +343,7 @@ struct PlayerScreen: View {
             Button { player.toggle() } label: {
                 ZStack {
                     Circle().fill(ink).frame(width: 68, height: 68)
-                    if player.loading && player.playing {
+                    if waiting && player.loading && player.playing {
                         ProgressView().tint(showText ? Color(look.current.background) : .black)
                     } else {
                         Image(systemName: player.playing ? "pause.fill" : "play.fill")
@@ -351,10 +354,16 @@ struct PlayerScreen: View {
                 }
             }
             .accessibilityLabel(player.playing ? "Pause" : "Play")
+            .task(id: player.loading && player.playing) {  // the spinner only if it takes a while: not a flash on every press
+                waiting = false
+                guard player.loading && player.playing else { return }
+                try? await Task.sleep(for: .milliseconds(400))
+                if !Task.isCancelled { waiting = true }
+            }
             if player.mode == .offline { control("goforward.30", "Forward 30 seconds") { player.skip(seconds: 30) } }
             control("forward.end.fill", "Next line") { player.nextLine() }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .frame(maxWidth: .infinity)
     }
 
@@ -391,7 +400,7 @@ struct PlayerScreen: View {
                 item(label: "Chapters") { Image(systemName: "list.bullet") }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
     }
 
     private var sleepLabel: String {
@@ -539,5 +548,18 @@ struct ChapterList: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Done", action: close) }
         }
+    }
+}
+
+/// A press shows at once and lets go quickly. (The plain style's slow fade looks odd on the big play button.)
+private struct PressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.92 : 1)
+            .opacity(configuration.isPressed && reduceMotion ? 0.6 : 1)
+            .animation(configuration.isPressed ? nil : .spring(response: 0.18, dampingFraction: 1), value: configuration.isPressed)
     }
 }

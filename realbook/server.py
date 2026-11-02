@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ahead, claude_analyzer, export, heuristic, lines, review, kokoro_tts, local_analyzer, model_finder, designed, remote, store, system, tts, voices
+from . import ahead, claude_analyzer, importer, export, heuristic, lines, review, kokoro_tts, local_analyzer, model_finder, designed, remote, store, system, tts, voices
 
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="RealBook")
@@ -220,6 +220,28 @@ async def upload(request: Request, filename: str):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return store.summary(book)
+
+
+class LocalPath(BaseModel):
+    path: str
+
+
+@app.post("/api/books/from-path")
+def add_from_path(p: LocalPath):
+    """A book file or EPUB folder on this Mac, picked in the native app's Open panel."""
+    try:
+        return store.summary(store.create(*importer.read_book_path(Path(p.path))))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/books/{book_id}/source-path")
+def update_from_path(book_id: str, p: LocalPath):
+    _book(book_id)
+    try:
+        return store.update_source(book_id, *importer.read_book_path(Path(p.path)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/books/{book_id}/source")

@@ -1,6 +1,6 @@
 [project]
 name = "realbook"
-version = "0.9.53"
+version = "0.10.0"
 description = "Read books aloud with a distinct voice for every character."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,7 @@ dependencies = [
 [project.scripts]
 realbook = "realbook.app:main"
 realbook-web = "realbook.server:main"
+realbook-engine = "realbook.engine:main"
 realbook-selftest = "realbook.selftest:main"
 
 [build-system]

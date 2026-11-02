@@ -51,11 +51,6 @@ def main(argv: list[str] | None = None) -> int:
                 say(traceback.format_exc())
                 return False
 
-        if system.MAC:  # packaged apps leave out what isn't imported: the native player needs to be there
-            from . import glass
-
-            say(f"native glass player: {'available' if glass.available() else 'not on this macOS'}")
-
         system_voices = [v for v in voices.installed_voices() if v["locale"].lower().startswith("en")]
         say(f"system voices: {len(system_voices)} English ({', '.join(v['name'] for v in system_voices[:6])})")
         if system_voices:

@@ -26,7 +26,7 @@ HEADER = "x-realbook-key"  # how the iPhone app sends the key
 # Things only someone sitting at the Mac may do.
 BLOCKED = [("PUT", "/api/settings"), ("POST", "/api/open-link"), ("POST", "/api/open-voice-settings"),
            ("POST", "/api/kokoro/install"), ("POST", "/api/qwen/install"), ("POST", "/api/remote"),
-           ("POST", "/api/remote/reset"), ("POST", "/api/ahead")]
+           ("POST", "/api/remote/reset"), ("POST", "/api/ahead"), ("POST", "/api/books/from-path")]
 SERVICE = "_realbook._tcp.local."
 
 _server = None
@@ -117,7 +117,7 @@ def authorised(key: str | None) -> bool:
 
 
 def blocked(method: str, path: str) -> bool:
-    return (method, path) in BLOCKED or path.endswith("/export/reveal") or path.endswith("/review/save")
+    return (method, path) in BLOCKED or path.endswith(("/export/reveal", "/review/save", "/source-path"))
 
 
 def status() -> dict:

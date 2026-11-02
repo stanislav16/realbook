@@ -10,6 +10,11 @@ if "--selftest" in sys.argv:
 
     sys.exit(selftest([a for a in sys.argv[1:] if a != "--selftest"]))
 
+if "--engine" in sys.argv:
+    from realbook.engine import main as engine
+
+    sys.exit(engine())
+
 from realbook.app import main
 
 main()

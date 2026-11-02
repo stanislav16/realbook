@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key><string>RealBook</string>
+	<key>CFBundleIdentifier</key><string>app.realbook.reader</string>
+	<key>CFBundleName</key><string>RealBook</string>
+	<key>CFBundleDisplayName</key><string>RealBook</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleIconFile</key><string>RealBook</string>
+	<key>CFBundleShortVersionString</key><string>VERSION</string>
+	<key>CFBundleVersion</key><string>VERSION</string>
+	<key>LSApplicationCategoryType</key><string>public.app-category.books</string>
+	<key>LSMinimumSystemVersion</key><string>14.0</string>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>NSPrincipalClass</key><string>NSApplication</string>
+	<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+	<key>NSLocalNetworkUsageDescription</key><string>RealBook lets your phone or tablet listen to your books over Wi-Fi.</string>
+</dict>
+</plist>

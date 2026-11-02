@@ -68,7 +68,6 @@ def _free_port() -> int:
 class Shell:
     def __init__(self) -> None:
         self.window: webview.Window | None = None
-        self.glass = None  # the native player, on a Mac that has Liquid Glass
 
     def js(self, code: str):
         return lambda: self.window.evaluate_js(code)
@@ -187,25 +186,6 @@ class Api:
 
     def add_books(self) -> None:
         self._shell.add_book()
-
-    def glass_start(self) -> bool:
-        """Whether this Mac can show the player on real Liquid Glass; if so it's now in the window."""
-        if not system.MAC:
-            return False
-        from . import glass
-
-        self._shell.glass = glass.start(self._shell.window.native)
-        return self._shell.glass is not None
-
-    def glass_show(self, state: dict) -> None:
-        from PyObjCTools import AppHelper
-
-        AppHelper.callAfter(self._shell.glass.show, state)
-
-    def glass_menu(self, spec: dict) -> None:
-        from PyObjCTools import AppHelper
-
-        AppHelper.callAfter(self._shell.glass.menu, spec)
 
     def update_from_file(self, book_id: str) -> dict | None:
         return self._shell.update_from_file(book_id)

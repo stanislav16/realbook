@@ -11,3 +11,4 @@ voice-test/
 *.m4b
 xcuserdata/
 *.xcodeproj/project.xcworkspace/
+mac/.build/

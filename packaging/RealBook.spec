@@ -1,4 +1,4 @@
-# PyInstaller spec for RealBook. Build with ./packaging/build_app.sh (Mac: RealBook.app)
+# PyInstaller spec for RealBook. On a Mac, ./packaging/build_app.sh puts this inside the native app (mac/).
 # or `uv run pyinstaller packaging/RealBook.spec` on Windows or Linux (dist/RealBook/RealBook[.exe]).
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).parent
-VERSION = "0.9.53"
+VERSION = "0.10.0"
 MAC = sys.platform == "darwin"
 
 datas = [
@@ -47,21 +47,3 @@ pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="RealBook", console=False, argv_emulation=False,
           icon=str(ROOT / "packaging" / ("RealBook.icns" if MAC else "RealBook.ico")))
 coll = COLLECT(exe, a.binaries, a.datas, name="RealBook")
-if MAC:
-    app = BUNDLE(
-        coll,
-        name="RealBook.app",
-        icon=str(ROOT / "packaging" / "RealBook.icns"),
-        bundle_identifier="app.realbook.reader",
-        version=VERSION,
-        info_plist={
-            "CFBundleDisplayName": "RealBook",
-            "CFBundleShortVersionString": VERSION,
-            "LSApplicationCategoryType": "public.app-category.books",
-            "LSMinimumSystemVersion": "14.0",  # onnxruntime (Kokoro); designed voices need what MLX needs
-            "NSHighResolutionCapable": True,
-            "NSRequiresAquaSystemAppearance": False,
-            # Shown when RealBook first listens for your phone on the home network.
-            "NSLocalNetworkUsageDescription": "RealBook lets your phone or tablet listen to your books over Wi-Fi.",
-        },
-    )

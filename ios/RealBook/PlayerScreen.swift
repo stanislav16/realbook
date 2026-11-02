@@ -21,6 +21,7 @@ struct PlayerScreen: View {
     @State private var dragY: CGFloat = 0
     @State private var height: CGFloat = 800
     @State private var waiting = false
+    @State private var panelHeight: CGFloat = 220
 
     enum Sheet: Identifiable {
         case chapters, look, cast, who(Int)
@@ -44,24 +45,33 @@ struct PlayerScreen: View {
             topBar.padding(.horizontal, 18).padding(.top, 8)
                 .contentShape(Rectangle())
                 .gesture(closeDrag)
-            if showText {
-                page
-            } else {
-                coverView.padding(.horizontal, 22)
-                    .contentShape(Rectangle())
-                    .gesture(closeDrag)
-            }
-            VStack(spacing: 0) {
-                if let message = player.notice ?? player.problem {
-                    Banner(text: message) { player.dismissNotice() }.padding(.bottom, 10)
+            // The controls float on glass: the text runs on under them, and the cover stops above them.
+            ZStack(alignment: .bottom) {
+                if showText {
+                    page.ignoresSafeArea(edges: .bottom)
+                } else {
+                    coverView.padding(.horizontal, 22).padding(.bottom, panelHeight + 8)
+                        .contentShape(Rectangle())
+                        .gesture(closeDrag)
                 }
-                scrubber
-                controls.padding(.top, 10).padding(.bottom, 14)
-                footer
+                VStack(spacing: 10) {
+                    if let message = player.notice ?? player.problem {
+                        Banner(text: message) { player.dismissNotice() }
+                    }
+                    VStack(spacing: 0) {
+                        scrubber
+                        controls.padding(.top, 8).padding(.bottom, 10)
+                        footer
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 10)
+                    .glass(in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 2)
+                .background(GeometryReader { g in Color.clear.onChange(of: g.size.height, initial: true) { _, now in panelHeight = now } })
             }
-            .padding(.horizontal, 22)
-            .padding(.top, showText ? 10 : 0)
-            .padding(.bottom, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(background)
@@ -153,7 +163,7 @@ struct PlayerScreen: View {
         HStack {
             Button(action: close) {
                 Image(systemName: "chevron.down").font(.body.weight(.semibold))
-                    .frame(width: 36, height: 36).background(ink.opacity(0.12), in: Circle())
+                    .frame(width: 36, height: 36).glass(in: Circle())
             }
             .accessibilityLabel("Close")
             Spacer()
@@ -170,7 +180,7 @@ struct PlayerScreen: View {
                 Button("Text Size & Theme", systemImage: "textformat.size") { sheet = .look }
             } label: {
                 Image(systemName: "ellipsis").font(.body.weight(.semibold))
-                    .frame(width: 36, height: 36).background(ink.opacity(0.12), in: Circle())
+                    .frame(width: 36, height: 36).glass(in: Circle())
             }
             .accessibilityLabel("More")
         }
@@ -194,8 +204,8 @@ struct PlayerScreen: View {
                 Label(modeLabel(away: away), systemImage: away ? "iphone" : player.mode == .live ? "dot.radiowaves.left.and.right" : "arrow.down.circle")
                     .font(.caption.weight(.semibold)).textCase(.uppercase)
                     .lineLimit(1).minimumScaleFactor(0.75)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(ink.opacity(0.12), in: Capsule())
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .glass(in: Capsule())
             }
             .disabled(player.mode != .live)
             .popover(isPresented: $showSaved) {
@@ -238,7 +248,7 @@ struct PlayerScreen: View {
             ChapterPage(
                 key: "\(bookID):\(player.mode.rawValue):\(player.chapter)", revision: player.revision, lines: player.page,
                 title: player.pageTitle, section: player.pageSection, current: player.segment, follow: following,
-                look: look, scheme: scheme, hasNext: player.chapter + 1 < player.chapterTitles.count, bottomInset: 0,
+                look: look, scheme: scheme, hasNext: player.chapter + 1 < player.chapterTitles.count, bottomInset: panelHeight + 8,
                 name: { player.name(of: $0) }, color: { player.color(of: $0) },
                 onTap: { s in
                     following = true
@@ -265,19 +275,20 @@ struct PlayerScreen: View {
                 },
                 menu: menu
             )
-            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.035),
-                                         .init(color: .black, location: 0.965), .init(color: .clear, location: 1)],
-                                 startPoint: .top, endPoint: .bottom))
+            .overlay(alignment: .top) {
+                LinearGradient(colors: [Color(look.current.background), Color(look.current.background).opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 16).allowsHitTesting(false)
+            }
             .overlay(alignment: .bottom) {
                 if !following {
                     Button { following = true } label: {
                         Label("Line Being Read", systemImage: "text.line.first.and.arrowtriangle.forward")
                             .font(.footnote.weight(.semibold))
                             .padding(.horizontal, 14).padding(.vertical, 8)
-                            .background(.regularMaterial, in: Capsule())
+                            .glass(in: Capsule())
                     }
                     .buttonStyle(PressStyle())
-                    .padding(.bottom, 10)
+                    .padding(.bottom, panelHeight + 10)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }

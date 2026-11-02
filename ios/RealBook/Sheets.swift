@@ -13,7 +13,7 @@ struct Banner: View {
         }
         .font(.footnote)
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 

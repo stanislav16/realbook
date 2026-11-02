@@ -370,8 +370,7 @@ struct MiniPlayer: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+        .glass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .padding(.horizontal)
         .padding(.bottom, 4)
         .contentShape(Rectangle())

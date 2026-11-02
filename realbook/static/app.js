@@ -485,6 +485,9 @@ function renderToc() {
   $("#toc-list").replaceChildren(...rows);
 }
 
+// How tall the floating player is, for what has to stop above it.
+new ResizeObserver(([e]) => $("#reader").style.setProperty("--player-h", `${e.target.offsetHeight}px`)).observe($("#player"));
+
 function togglePanel(which) {
   if (!S.book) return;
   const r = $("#reader");
@@ -594,9 +597,10 @@ function scrollToLine(node, jump) {
   const page = $("#page");
   if (!page.clientHeight) return;  // on the cover view
   const r = node.getBoundingClientRect(), pr = page.getBoundingClientRect();
-  if (!jump && r.top >= pr.top + 60 && r.bottom <= pr.bottom - 60) return;
+  const under = $("#player").offsetHeight + 14;  // the text runs on under the player
+  if (!jump && r.top >= pr.top + 60 && r.bottom <= pr.bottom - under - 60) return;
   // Only the page moves: scrollIntoView would also move anything around it that can scroll.
-  const top = Math.max(0, Math.min(page.scrollHeight - page.clientHeight, page.scrollTop + r.top - pr.top - Math.max(40, (pr.height - r.height) * 0.3)));
+  const top = Math.max(0, Math.min(page.scrollHeight - page.clientHeight, page.scrollTop + r.top - pr.top - Math.max(40, (pr.height - under - r.height) * 0.3)));
   clearTimeout(S.scrollCheck);
   page.scrollTo({ top, behavior: jump || matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   // A smooth scroll can stall, never moving, while the window isn't being drawn (behind another

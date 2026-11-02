@@ -112,3 +112,16 @@ extension UIColor {
         }
     }
 }
+
+extension View {
+    /// Liquid Glass where the system has it (iOS 26), a frosted material before that. For things that
+    /// float over the content, never on the content, and never one on another. Not `.interactive()`:
+    /// presses are `PressStyle`'s, which answer at once.
+    @ViewBuilder func glass<S: Shape>(in shape: S) -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular, in: shape)
+        } else {
+            background(.regularMaterial, in: shape)
+        }
+    }
+}

@@ -1567,10 +1567,10 @@ function glassScrub(line, ended) {
 function nativeMenu(anchor, items) {
   const r = anchor.getBoundingClientRect();
   S.glassItems = items.filter(Boolean);
-  window.pywebview.api.glass_menu({ x: r.left, y: r.top, w: r.width, h: r.height, player: !!anchor.closest("#player"), items: S.glassItems.map((it) => it === "-" ? null : {
+  window.pywebview.api.glass_menu({ x: r.left, y: r.top, w: r.width, h: r.height, player: !!anchor.closest?.("#player"), items: S.glassItems.map((it) => it === "-" ? null : {
     label: it.label, disabled: !!it.disabled, danger: !!it.danger, note: it.note || "", dot: it.dot || "" }) });
 }
-function glassMenuClosed(i) { if (i >= 0) S.glassItems[i].action(); }
+function glassMenuPicked(i) { S.glassItems[i].action(); }
 
 async function startGlass() {
   if (!document.body.classList.contains("mac") || !(await window.pywebview.api.glass_start())) return;

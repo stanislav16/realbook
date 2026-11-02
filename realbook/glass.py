@@ -294,17 +294,16 @@ class Player:
         self.js(f"glassScrub({value}, {'true' if ended else 'false'})")
 
     def menu(self, spec: dict) -> None:
-        """A native menu at the page's button; it says which item was picked, if any."""
+        """A native menu at the page's button; it says which item is picked, if one is."""
         menu = AppKit.NSMenu.alloc().init()
         menu.setAutoenablesItems_(False)
-        chosen: list[int] = []
-        picker = _MenuTarget.alloc().initWithChosen_(chosen)
+        self.picker = _MenuTarget.alloc().initWithOwner_(self)  # kept: a menu doesn't hold on to its target
         for i, it in enumerate(spec["items"]):
             if it is None:
                 menu.addItem_(AppKit.NSMenuItem.separatorItem())
                 continue
             item = menu.addItemWithTitle_action_keyEquivalent_(it["label"], "picked:", "")
-            item.setTarget_(picker)
+            item.setTarget_(self.picker)
             item.setTag_(i)
             item.setEnabled_(not it.get("disabled"))
             if it.get("note") == "✓":
@@ -324,18 +323,19 @@ class Player:
         y = bottom + 4
         if y + menu.size().height > self.web.bounds().size.height - 8:
             y = top - menu.size().height - 4
-        menu.popUpMenuPositioningItem_atLocation_inView_(None, NSMakePoint(x, y), self.web)  # returns once it's closed
-        self.js(f"glassMenuClosed({chosen[0] if chosen else -1})")
+        # On the screen, not in the page: a menu shown in a web view closes at once.
+        where = self.window.convertPointToScreen_(self.web.convertPoint_toView_(NSMakePoint(x, y), None))
+        menu.popUpMenuPositioningItem_atLocation_inView_(None, where, None)
 
 
 class _MenuTarget(NSObject):
-    def initWithChosen_(self, chosen):
+    def initWithOwner_(self, owner):
         self = objc.super(_MenuTarget, self).init()
-        self.chosen = chosen
+        self.owner = owner
         return self
 
     def picked_(self, sender):
-        self.chosen.append(int(sender.tag()))
+        self.owner.js(f"glassMenuPicked({int(sender.tag())})")
 
 
 def _dot(css: str) -> AppKit.NSImage:

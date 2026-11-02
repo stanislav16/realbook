@@ -134,6 +134,7 @@ function toast(msg, ms = 3500) {
 // A macOS-style popup menu next to `anchor`. items: [{label, action, danger, disabled, dot, note, find}] or "-".
 // With `search`, a field on top filters the items that have `find` (the text to match); Return picks the first.
 function popupMenu(anchor, items, { search = false } = {}) {
+  if (S.nativeGlass && !search) return nativeMenu(anchor, items);
   const menu = $("#menu");
   if (!menu.classList.contains("hidden") && S.menuAnchor === anchor) return closeMenu();  // its button again: closes it
   closePopovers();
@@ -597,7 +598,7 @@ function scrollToLine(node, jump) {
   const page = $("#page");
   if (!page.clientHeight) return;  // on the cover view
   const r = node.getBoundingClientRect(), pr = page.getBoundingClientRect();
-  const under = $("#player").offsetHeight + 14;  // the text runs on under the player
+  const under = document.body.classList.contains("mac") ? $("#player").offsetHeight + 14 : 0;  // there, the text runs on under the player
   if (!jump && r.top >= pr.top + 60 && r.bottom <= pr.bottom - under - 60) return;
   // Only the page moves: scrollIntoView would also move anything around it that can scroll.
   const top = Math.max(0, Math.min(page.scrollHeight - page.clientHeight, page.scrollTop + r.top - pr.top - Math.max(40, (pr.height - under - r.height) * 0.3)));
@@ -1526,6 +1527,66 @@ async function refreshCast() {
   renderPage();
   highlight();
 }
+
+/* ------------------------------------------------- the Mac's player on real Liquid Glass */
+
+// glass.py draws the player natively, over this page, on a Mac that can. The page's own player stays
+// in charge, unseen: this tells the native one what to show, and its controls press these.
+function glassState() {
+  const reader = $("#reader"), p = $("#player").getBoundingClientRect();
+  const [r, g, b] = getComputedStyle(reader).backgroundColor.match(/[\d.]+/g).map(Number);
+  return {
+    visible: !reader.classList.contains("hidden") && !$("#dialog").open && $("#menu").classList.contains("hidden"),
+    x: p.left, y: p.top, w: p.width, h: p.height,
+    left: $("#pos-left").textContent, right: $("#pos-right").textContent,
+    value: +$("#scrub").value, max: +$("#scrub").max,
+    playing: !$("#icon-pause").classList.contains("hidden"), loading: $("#play").classList.contains("loading"),
+    speed: $("#speed-label").textContent, sleep: $("#sleep-btn > span:last-child").textContent,
+    sleepOn: $("#sleep-btn").classList.contains("on"), textOn: $("#text-btn").classList.contains("on"), tocOn: $("#toc-btn").classList.contains("on"),
+    dark: 0.3 * r + 0.6 * g + 0.1 * b < 128,
+  };
+}
+
+let glassSent = "", glassPending = false;
+function sendGlass() {
+  if (glassPending) return;
+  glassPending = true;
+  setTimeout(() => {
+    glassPending = false;
+    const state = glassState(), text = JSON.stringify(state);
+    if (text !== glassSent) { glassSent = text; window.pywebview.api.glass_show(state); }
+  });
+}
+
+function glassScrub(line, ended) {
+  $("#scrub").value = line;
+  if (ended) jumpTo(line);
+  else showScrub(line);
+}
+
+function nativeMenu(anchor, items) {
+  const r = anchor.getBoundingClientRect();
+  S.glassItems = items.filter(Boolean);
+  window.pywebview.api.glass_menu({ x: r.left, y: r.top, w: r.width, h: r.height, items: S.glassItems.map((it) => it === "-" ? null : {
+    label: it.label, disabled: !!it.disabled, danger: !!it.danger, note: it.note || "", dot: it.dot || "" }) });
+}
+function glassMenuClosed(i) { if (i >= 0) S.glassItems[i].action(); }
+
+async function startGlass() {
+  if (!document.body.classList.contains("mac") || !(await window.pywebview.api.glass_start())) return;
+  S.nativeGlass = true;
+  document.body.classList.add("native-glass");
+  const watch = new MutationObserver(sendGlass);
+  watch.observe($("#player"), { subtree: true, childList: true, characterData: true, attributes: true });
+  watch.observe($("#reader"), { attributes: true, attributeFilter: ["class", "data-theme"] });
+  watch.observe($("#dialog"), { attributes: true, attributeFilter: ["open"] });
+  watch.observe($("#menu"), { attributes: true, attributeFilter: ["class"] });
+  new ResizeObserver(sendGlass).observe($("#player"));
+  addEventListener("resize", sendGlass);
+  sendGlass();
+}
+if (window.pywebview?.api) startGlass();
+else addEventListener("pywebviewready", startGlass, { once: true });
 
 /* -------------------------------------------------------------------- wiring */
 

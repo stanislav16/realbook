@@ -329,33 +329,39 @@ dialog[open]::backdrop { opacity: 1; }
 
 /* Glass: what floats over the content is see-through, blurring what's behind it, with light along
    its edge. A web page can only frost what's behind it; bending it, as Apple's Liquid Glass does on
-   the iPhone, is for native views. Not one glass surface on another, and the text never moves for it. */
+   the iPhone, is for native views (glass.py does that for the player). Not one glass surface on another.
+   The Mac's only: Windows and Linux keep their plain look. */
 :root { --glass-edge: inset 0 .5px 0 rgba(255, 255, 255, .6), inset 0 0 0 .5px rgba(255, 255, 255, .22); --glass-sheen: linear-gradient(150deg, rgba(255, 255, 255, .14), transparent 42%); }
-.player, .menu, .popover, dialog, .toast, .follow-btn, .round-btn, .panel, .lib-toolbar { -webkit-backdrop-filter: blur(28px) saturate(170%); backdrop-filter: blur(28px) saturate(170%); }
+body.mac .player, body.mac .menu, body.mac .popover, body.mac dialog, body.mac .toast, body.mac .follow-btn, body.mac .round-btn, body.mac .panel, body.mac .lib-toolbar { -webkit-backdrop-filter: blur(28px) saturate(170%); backdrop-filter: blur(28px) saturate(170%); }
 
-.player { position: absolute; left: 50%; bottom: 14px; z-index: 1; translate: -50% 0; width: min(600px, calc(100% - 28px)); margin: 0; padding: 10px 20px 12px; border-radius: 28px;
+body.mac .player { position: absolute; left: 50%; bottom: 14px; z-index: 1; translate: -50% 0; width: min(600px, calc(100% - 28px)); margin: 0; padding: 10px 20px 12px; border-radius: 28px;
   background: var(--glass-sheen), color-mix(in srgb, var(--page-bg) 58%, transparent); box-shadow: var(--glass-edge), 0 10px 40px rgba(0, 0, 0, .22); }
-.reader:not(.text-view) .player { background: var(--glass-sheen), rgba(255, 255, 255, .1); }  /* over the dark cover view, as on the iPhone */
-.player-controls { margin: 4px 0 8px; }
-.page { padding-bottom: calc(var(--player-h, 170px) + 40px); -webkit-mask-image: linear-gradient(transparent, #000 24px); mask-image: linear-gradient(transparent, #000 24px); }
-.nowplaying { padding-bottom: calc(var(--player-h, 170px) + 24px); }
-.follow-btn { margin-bottom: calc(var(--player-h, 170px) + 26px); background: var(--glass-sheen), color-mix(in srgb, var(--page-bg) 55%, transparent); box-shadow: var(--glass-edge), 0 4px 16px rgba(0, 0, 0, .18); }
-.round-btn { background: var(--glass-sheen), color-mix(in srgb, var(--page-ink) 10%, transparent); box-shadow: var(--glass-edge), 0 1px 4px rgba(0, 0, 0, .12); }
+body.mac .reader:not(.text-view) .player { background: var(--glass-sheen), rgba(255, 255, 255, .1); }  /* over the dark cover view, as on the iPhone */
+body.mac .player-controls { margin: 4px 0 8px; }
+body.mac .page { padding-bottom: calc(var(--player-h, 170px) + 40px); -webkit-mask-image: linear-gradient(transparent, #000 24px); mask-image: linear-gradient(transparent, #000 24px); }
+body.mac .nowplaying { padding-bottom: calc(var(--player-h, 170px) + 24px); }
+body.mac .follow-btn { margin-bottom: calc(var(--player-h, 170px) + 26px); background: var(--glass-sheen), color-mix(in srgb, var(--page-bg) 55%, transparent); box-shadow: var(--glass-edge), 0 4px 16px rgba(0, 0, 0, .18); }
+body.mac .round-btn { background: var(--glass-sheen), color-mix(in srgb, var(--page-ink) 10%, transparent); box-shadow: var(--glass-edge), 0 1px 4px rgba(0, 0, 0, .12); }
 
-.panel { background: var(--glass-sheen), color-mix(in srgb, var(--page-bg) 70%, transparent); }
-.panel-head, .toc-list button.toc-section { background: var(--page-bg); }  /* solid: names scrolling under them mustn't show through */
+body.mac .panel { background: var(--glass-sheen), color-mix(in srgb, var(--page-bg) 70%, transparent); }
+body.mac .panel-head, body.mac .toc-list button.toc-section { background: var(--page-bg); }  /* solid: names scrolling under them mustn't show through */
 
-.menu { background: var(--glass-sheen), color-mix(in srgb, var(--elevated) 62%, transparent); box-shadow: var(--glass-edge), var(--shadow-pop); border-radius: 12px; }
-.popover { background: var(--glass-sheen), color-mix(in srgb, var(--elevated) 66%, transparent); box-shadow: var(--glass-edge), var(--shadow-pop); border-radius: 18px; }
-dialog { background: var(--glass-sheen), color-mix(in srgb, var(--elevated) 70%, transparent); box-shadow: var(--glass-edge), var(--shadow-pop); border-radius: 18px; }
-.toast { background: rgba(0, 0, 0, .58); box-shadow: inset 0 .5px 0 rgba(255, 255, 255, .35), 0 6px 24px rgba(0, 0, 0, .35); border-radius: 14px; }
+body.mac .menu { background: var(--glass-sheen), color-mix(in srgb, var(--elevated) 62%, transparent); box-shadow: var(--glass-edge), var(--shadow-pop); border-radius: 12px; }
+body.mac .popover { background: var(--glass-sheen), color-mix(in srgb, var(--elevated) 66%, transparent); box-shadow: var(--glass-edge), var(--shadow-pop); border-radius: 18px; }
+body.mac dialog { background: var(--glass-sheen), color-mix(in srgb, var(--elevated) 70%, transparent); box-shadow: var(--glass-edge), var(--shadow-pop); border-radius: 18px; }
+body.mac .toast { background: rgba(0, 0, 0, .58); box-shadow: inset 0 .5px 0 rgba(255, 255, 255, .35), 0 6px 24px rgba(0, 0, 0, .35); border-radius: 14px; }
 
 /* The library: a sidebar that floats in the window, and books that scroll on under the toolbar. */
-.sidebar { margin: 8px 0 8px 8px; border: 0; border-radius: 18px; background: var(--glass-sheen), var(--sidebar); box-shadow: var(--glass-edge), 0 0 0 .5px var(--separator), 0 6px 24px rgba(0, 0, 0, .08); }
-.library-main { position: relative; }
-.lib-toolbar { position: absolute; top: 0; left: 0; right: 0; z-index: 2; background: color-mix(in srgb, var(--window) 62%, transparent); }
-.library-scroll { padding-top: 60px; }
-#search { border-radius: 99px; }
+body.mac .sidebar { margin: 8px 0 8px 8px; border: 0; border-radius: 18px; background: var(--glass-sheen), var(--sidebar); box-shadow: var(--glass-edge), 0 0 0 .5px var(--separator), 0 6px 24px rgba(0, 0, 0, .08); }
+body.mac .library-main { position: relative; }
+body.mac .lib-toolbar { position: absolute; top: 0; left: 0; right: 0; z-index: 2; background: color-mix(in srgb, var(--window) 62%, transparent); }
+body.mac .library-scroll { padding-top: 60px; }
+body.mac #search { border-radius: 99px; }
+
+/* The native player (glass.py) is drawn over the page's, which stays, unseen, and makes room for side panels. */
+body.native-glass .player { visibility: hidden; }
+body.native-glass .reader.show-toc .player { left: calc(50% + 150px); width: min(600px, calc(100% - 328px)); }
+body.native-glass .reader.show-cast .player { left: calc(50% - 180px); width: min(600px, calc(100% - 388px)); }
 
 /* The system's accessibility settings. */
 @media (prefers-reduced-motion: reduce) {
@@ -372,20 +378,22 @@ dialog { background: var(--glass-sheen), color-mix(in srgb, var(--elevated) 70%,
   .reader.show-toc .panel.left, .reader.show-cast .panel.right { opacity: 1; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .player, .menu, .popover, dialog, .toast, .follow-btn, .round-btn, .panel, .lib-toolbar { backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .player, .follow-btn, .panel, .panel-head, .toc-list button.toc-section { background: var(--page-bg); }
-  .player { box-shadow: 0 0 0 .5px var(--page-line), 0 10px 40px rgba(0, 0, 0, .22); }
-  .round-btn { background: color-mix(in srgb, var(--page-ink) 12%, var(--page-bg)); }
-  .menu, .popover, dialog { background: var(--elevated); }
-  .lib-toolbar { background: var(--window); }
+  .menu { background: var(--elevated); backdrop-filter: none; -webkit-backdrop-filter: none; }
   .toast { background: #000; }
+  body.mac .player, body.mac .menu, body.mac .popover, body.mac dialog, body.mac .toast, body.mac .follow-btn, body.mac .round-btn, body.mac .panel, body.mac .lib-toolbar { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  body.mac .player, body.mac .follow-btn, body.mac .panel, body.mac .panel-head, body.mac .toc-list button.toc-section { background: var(--page-bg); }
+  body.mac .player { box-shadow: 0 0 0 .5px var(--page-line), 0 10px 40px rgba(0, 0, 0, .22); }
+  body.mac .round-btn { background: color-mix(in srgb, var(--page-ink) 12%, var(--page-bg)); }
+  body.mac .menu, body.mac .popover, body.mac dialog { background: var(--elevated); }
+  body.mac .lib-toolbar { background: var(--window); }
+  body.mac .toast { background: #000; }
   dialog::backdrop { background: rgba(0, 0, 0, .6); }
 }
 @media (prefers-contrast: more) {
   :root { --secondary: #48484a; --tertiary: #6e6e73; --separator: rgba(0, 0, 0, .4); --control-border: rgba(0, 0, 0, .6); --fill-strong: rgba(0, 0, 0, .18); }
-  .player, .follow-btn, .panel, .panel-head, .toc-list button.toc-section { background: color-mix(in srgb, var(--page-bg) 94%, transparent); }
-  .player, .follow-btn { box-shadow: 0 0 0 1px var(--page-line); }
-  .menu, .popover, dialog { background: color-mix(in srgb, var(--elevated) 96%, transparent); box-shadow: 0 0 0 1px var(--control-border), var(--shadow-pop); }
+  body.mac .player, body.mac .follow-btn, body.mac .panel, body.mac .panel-head, body.mac .toc-list button.toc-section { background: color-mix(in srgb, var(--page-bg) 94%, transparent); }
+  body.mac .player, body.mac .follow-btn { box-shadow: 0 0 0 1px var(--page-line); }
+  body.mac .menu, body.mac .popover, body.mac dialog { background: color-mix(in srgb, var(--elevated) 96%, transparent); box-shadow: 0 0 0 1px var(--control-border), var(--shadow-pop); }
   #reader { --page-muted: color-mix(in srgb, var(--page-ink) 85%, transparent); --page-line: color-mix(in srgb, var(--page-ink) 50%, transparent); }
   .icon, .tb-btn, .round-btn { outline: 1px solid color-mix(in srgb, currentColor 35%, transparent); outline-offset: -1px; }
 }

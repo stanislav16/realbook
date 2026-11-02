@@ -261,8 +261,16 @@ struct Root: View {
             await DebugScript.run(model)
             #endif
         }
-        .onAppear { model.look.systemDark = scheme == .dark }
-        .onChange(of: scheme) { _, now in model.look.systemDark = now == .dark }
+        .onAppear { schemeChanged(scheme) }
+        .onChange(of: scheme) { _, now in schemeChanged(now) }
+    }
+}
+
+extension Root {
+    /// Black in dark mode, as on the iPhone, not the system's grey; the glass takes its colour from this.
+    private func schemeChanged(_ now: ColorScheme) {
+        model.look.systemDark = now == .dark
+        for window in NSApp.windows { window.backgroundColor = now == .dark ? .black : .white }
     }
 }
 

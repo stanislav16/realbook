@@ -25,11 +25,11 @@ struct ExportSheet: View {
                     if let file = s.file {
                         Text("\(s.state == "done" ? (s.message ?? "") + ". " : "")“\(file)” (\(sizeText(s.bytes ?? 0))), made \(Date(timeIntervalSince1970: s.made ?? 0).formatted()).").font(.caption)
                         HStack {
-                            Button("Show in Finder") { act("export/reveal") }.buttonStyle(.borderedProminent)
+                            Button("Show in Finder") { act("export/reveal") }.buttonStyle(ProminentButton())
                             Button("Export Again") { act("export") }
                         }
                     } else {
-                        Button("Export") { act("export") }.buttonStyle(.borderedProminent)
+                        Button("Export") { act("export") }.buttonStyle(ProminentButton())
                     }
                 }
             } else {
@@ -117,7 +117,7 @@ struct PhoneScreen: View {
             Button("Turn Off") { post("api/remote", json: ["enabled": false]) }
         } else {
             Text("Let your iPhone reach RealBook over your Wi‑Fi, to download books and keep your place in step with this Mac.").font(.callout).foregroundStyle(.secondary)
-            Button("Turn On") { post("api/remote", json: ["enabled": true]) }.buttonStyle(.borderedProminent)
+            Button("Turn On") { post("api/remote", json: ["enabled": true]) }.buttonStyle(ProminentButton())
         }
     }
 
@@ -173,7 +173,7 @@ struct PhoneScreen: View {
         } else if b.export.file != nil && b.export.phone == true {
             Button("Update") { post("api/books/\(b.id)/export") }.help("Make it again, with the current voices")
         } else {
-            Button("Make Offline Copy") { post("api/books/\(b.id)/export") }.buttonStyle(.borderedProminent)
+            Button("Make Offline Copy") { post("api/books/\(b.id)/export") }.buttonStyle(ProminentButton())
         }
     }
 

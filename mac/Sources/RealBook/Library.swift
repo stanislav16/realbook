@@ -3,6 +3,7 @@ import SwiftUI
 /// The native sidebar (Liquid Glass by itself on macOS 26) and the shelf.
 struct LibraryScreen: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var scheme
     @State private var removing: AppModel.Book?
     @State private var info: AppModel.Book?
     @State private var dropping = false
@@ -32,6 +33,8 @@ struct LibraryScreen: View {
                     shelf
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background { (scheme == .dark ? Color.black : Color.white).ignoresSafeArea() }
             .navigationTitle(model.filter.rawValue)
             .searchable(text: $model.search, prompt: "Search")
             .toolbar {
@@ -91,7 +94,7 @@ struct LibraryScreen: View {
                     .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 ProgressView(value: book.progress).frame(maxWidth: 320)
                 Button("Resume", systemImage: "play.fill") { model.open(book.id, play: true) }
-                    .buttonStyle(.borderedProminent).controlSize(.regular).padding(.top, 6)
+                    .buttonStyle(ProminentButton()).padding(.top, 6)
             }
             Spacer(minLength: 0)
         }
@@ -114,7 +117,7 @@ struct LibraryScreen: View {
                     ProgressView(value: book.progress).controlSize(.small)
                     Text("\(Int(book.progress * 100))%").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 } else {
-                    Text("NEW").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 1).background(.tint, in: Capsule()).foregroundStyle(.background)
+                    Text("NEW").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 1).background(Color(nsColor: .labelColor), in: Capsule()).foregroundStyle(Color(nsColor: .windowBackgroundColor))
                 }
                 Spacer(minLength: 0)
                 Menu {

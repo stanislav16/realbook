@@ -55,6 +55,32 @@ struct GlassButton: ButtonStyle {
     }
 }
 
+/// The main action on a screen: solid, in the text's colour, as on the iPhone.
+struct ProminentButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Inner(configuration: configuration) }
+
+    private struct Inner: View {
+        let configuration: Configuration
+        @State private var hovering = false
+        @Environment(\.isEnabled) private var enabled
+        @Environment(\.colorScheme) private var scheme
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(scheme == .dark ? Color.black : Color.white)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(scheme == .dark ? Color.white : Color.black, in: Capsule())
+                .contentShape(Capsule())
+                .onHover { hovering = $0 }
+                .opacity(!enabled ? 0.45 : configuration.isPressed && reduceMotion ? 0.6 : hovering ? 0.88 : 1)
+                .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+                .animation(configuration.isPressed ? nil : .spring(response: 0.18, dampingFraction: 1), value: configuration.isPressed)
+        }
+    }
+}
+
 extension NSColor {
     convenience init(hex: String) {
         let v = Int(hex.dropFirst(), radix: 16) ?? 0

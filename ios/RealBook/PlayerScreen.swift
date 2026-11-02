@@ -21,7 +21,7 @@ struct PlayerScreen: View {
     @State private var dragY: CGFloat = 0
     @State private var height: CGFloat = 800
     @State private var waiting = false
-    @State private var panelHeight: CGFloat = 220
+    @State private var panelHeight: CGFloat = 120
 
     enum Sheet: Identifiable {
         case chapters, look, cast, who(Int)
@@ -54,24 +54,45 @@ struct PlayerScreen: View {
                         .contentShape(Rectangle())
                         .gesture(closeDrag)
                 }
+                if showText {
+                    // The text fades on its way under the glass, so only a hint of it shows through.
+                    LinearGradient(stops: [.init(color: Color(look.current.background).opacity(0), location: 0),
+                                           .init(color: Color(look.current.background).opacity(0.82), location: 60 / (panelHeight + 60)),
+                                           .init(color: Color(look.current.background).opacity(0.97), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: panelHeight + 60)
+                        .ignoresSafeArea(edges: .bottom)
+                        .allowsHitTesting(false)
+                    if !following {
+                        Button { following = true } label: {
+                            Label("Line Being Read", systemImage: "text.line.first.and.arrowtriangle.forward")
+                                .font(.footnote.weight(.semibold))
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .glass(in: Capsule())
+                        }
+                        .buttonStyle(PressStyle())
+                        .padding(.bottom, panelHeight + 10)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                }
                 VStack(spacing: 10) {
                     if let message = player.notice ?? player.problem {
                         Banner(text: message) { player.dismissNotice() }
                     }
-                    VStack(spacing: 0) {
+                    VStack(spacing: 4) {
                         scrubber
-                        controls.padding(.top, 8).padding(.bottom, 10)
-                        footer
+                        controls
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 12)
-                    .padding(.bottom, 10)
-                    .glass(in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                    .glass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 2)
                 .background(GeometryReader { g in Color.clear.onChange(of: g.size.height, initial: true) { _, now in panelHeight = now } })
             }
+            .animation(.easeOut(duration: 0.2), value: following)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(background)
@@ -175,6 +196,10 @@ struct PlayerScreen: View {
                 if player.mode == .live {
                     Button("Offline Listening", systemImage: "iphone") { showSaved = true }
                 }
+                if player.mode == .offline {
+                    Button("Previous Line", systemImage: "backward.end") { player.previousLine() }
+                    Button("Next Line", systemImage: "forward.end") { player.nextLine() }
+                }
                 Divider()
                 Button("Cast", systemImage: "person.2") { sheet = .cast }
                 Button("Text Size & Theme", systemImage: "textformat.size") { sheet = .look }
@@ -248,7 +273,7 @@ struct PlayerScreen: View {
             ChapterPage(
                 key: "\(bookID):\(player.mode.rawValue):\(player.chapter)", revision: player.revision, lines: player.page,
                 title: player.pageTitle, section: player.pageSection, current: player.segment, follow: following,
-                look: look, scheme: scheme, hasNext: player.chapter + 1 < player.chapterTitles.count, bottomInset: panelHeight + 8,
+                look: look, scheme: scheme, hasNext: player.chapter + 1 < player.chapterTitles.count, bottomInset: panelHeight + 56,
                 name: { player.name(of: $0) }, color: { player.color(of: $0) },
                 onTap: { s in
                     following = true
@@ -279,20 +304,6 @@ struct PlayerScreen: View {
                 LinearGradient(colors: [Color(look.current.background), Color(look.current.background).opacity(0)], startPoint: .top, endPoint: .bottom)
                     .frame(height: 16).allowsHitTesting(false)
             }
-            .overlay(alignment: .bottom) {
-                if !following {
-                    Button { following = true } label: {
-                        Label("Line Being Read", systemImage: "text.line.first.and.arrowtriangle.forward")
-                            .font(.footnote.weight(.semibold))
-                            .padding(.horizontal, 14).padding(.vertical, 8)
-                            .glass(in: Capsule())
-                    }
-                    .buttonStyle(PressStyle())
-                    .padding(.bottom, panelHeight + 10)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-            }
-            .animation(.easeOut(duration: 0.2), value: following)
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -330,7 +341,7 @@ struct PlayerScreen: View {
 
     private var scrubber: some View {
         let labels = player.progressLabels(at: scrubbing)
-        return VStack(spacing: 4) {
+        return VStack(spacing: 0) {
             Slider(value: Binding(get: { scrubbing ?? player.progress }, set: { scrubbing = $0 }), in: 0...1) { editing in
                 if !editing, let s = scrubbing {
                     player.scrub(to: s)
@@ -342,25 +353,55 @@ struct PlayerScreen: View {
                 Spacer()
                 Text(labels.1)
             }
-            .font(.caption.monospacedDigit()).foregroundStyle(muted)
+            .font(.caption2.monospacedDigit()).foregroundStyle(muted)
         }
     }
 
-    /// Centred on the play button, the same distance between each.
+    /// One row, as on the Mac: speed and sleep, play in the middle, then the text and chapters. The
+    /// offline copy skips by time here; its line by line is in the top bar's menu.
     private var controls: some View {
-        HStack(spacing: player.mode == .offline ? 22 : 40) {
-            control("backward.end.fill", "Previous line") { player.previousLine() }
-            if player.mode == .offline { control("gobackward.15", "Back 15 seconds") { player.skip(seconds: -15) } }
+        let offline = player.mode == .offline
+        return HStack(spacing: 0) {
+            Menu {
+                Picker("Speed", selection: Bindable(player).speed) {
+                    ForEach(Player.speeds, id: \.self) { Text(Self.speedLabel($0)).tag($0) }
+                }
+            } label: {
+                item { Text(Self.speedLabel(player.speed)).font(.system(size: 14, weight: .semibold).monospacedDigit()) }
+            }
+            .accessibilityLabel("Speed")
+            Menu {
+                Picker("Sleep Timer", selection: Binding(get: { player.sleep }, set: { player.setSleep($0) })) {
+                    Text("Off").tag(Player.Sleep.off)
+                    ForEach([5, 15, 30, 45, 60], id: \.self) { Text("\($0) minutes").tag(Player.Sleep.minutes($0)) }
+                    Text("End of Chapter").tag(Player.Sleep.endOfChapter)
+                }
+            } label: {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    item(on: player.sleep != .off) {
+                        if let ends = player.sleepEnds {
+                            Text(Player.time(Int(max(0, ends.timeIntervalSinceNow) * 1000))).font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        } else {
+                            Image(systemName: player.sleep == .off ? "moon.zzz" : "moon.fill")
+                        }
+                    }
+                }
+            }
+            .accessibilityLabel(sleepLabel)
+            Spacer(minLength: 0)
+            control(offline ? "gobackward.15" : "backward.end.fill", offline ? "Back 15 seconds" : "Previous line") {
+                if offline { player.skip(seconds: -15) } else { player.previousLine() }
+            }
             Button { player.toggle() } label: {
                 ZStack {
-                    Circle().fill(ink).frame(width: 68, height: 68)
+                    Circle().fill(ink).frame(width: 50, height: 50)
                     if waiting && player.loading && player.playing {
                         ProgressView().tint(showText ? Color(look.current.background) : .black)
                     } else {
                         Image(systemName: player.playing ? "pause.fill" : "play.fill")
-                            .font(.system(size: 26, weight: .semibold))
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(showText ? Color(look.current.background) : .black)
-                            .offset(x: player.playing ? 0 : 2)
+                            .offset(x: player.playing ? 0 : 1.5)
                     }
                 }
             }
@@ -371,47 +412,25 @@ struct PlayerScreen: View {
                 try? await Task.sleep(for: .milliseconds(400))
                 if !Task.isCancelled { waiting = true }
             }
-            if player.mode == .offline { control("goforward.30", "Forward 30 seconds") { player.skip(seconds: 30) } }
-            control("forward.end.fill", "Next line") { player.nextLine() }
+            control(offline ? "goforward.30" : "forward.end.fill", offline ? "Forward 30 seconds" : "Next line") {
+                if offline { player.skip(seconds: 30) } else { player.nextLine() }
+            }
+            Spacer(minLength: 0)
+            Button { showText.toggle() } label: {
+                item(on: showText) { Image(systemName: "text.quote") }
+            }
+            .accessibilityLabel("Text")
+            Button { sheet = .chapters } label: {
+                item { Image(systemName: "list.bullet") }
+            }
+            .accessibilityLabel("Chapters")
         }
         .buttonStyle(PressStyle())
-        .frame(maxWidth: .infinity)
     }
 
     private func control(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon).font(.title2).frame(width: 48, height: 48) }
+        Button(action: action) { Image(systemName: icon).font(.system(size: 19)).frame(width: 44, height: 44) }
             .accessibilityLabel(label)
-    }
-
-    /// Four equal places: speed, sleep timer, the text, and chapters.
-    private var footer: some View {
-        HStack(spacing: 0) {
-            Menu {
-                Picker("Speed", selection: Bindable(player).speed) {
-                    ForEach(Player.speeds, id: \.self) { Text(Self.speedLabel($0)).tag($0) }
-                }
-            } label: {
-                item(label: "Speed") { Text(Self.speedLabel(player.speed)).font(.system(size: 17, weight: .semibold)) }
-            }
-            Menu {
-                Picker("Sleep Timer", selection: Binding(get: { player.sleep }, set: { player.setSleep($0) })) {
-                    Text("Off").tag(Player.Sleep.off)
-                    ForEach([5, 15, 30, 45, 60], id: \.self) { Text("\($0) minutes").tag(Player.Sleep.minutes($0)) }
-                    Text("End of Chapter").tag(Player.Sleep.endOfChapter)
-                }
-            } label: {
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    item(on: player.sleep != .off, label: sleepLabel) { Image(systemName: player.sleep == .off ? "moon.zzz" : "moon.fill") }
-                }
-            }
-            Button { showText.toggle() } label: {
-                item(on: showText, label: "Text") { Image(systemName: "text.quote") }
-            }
-            Button { sheet = .chapters } label: {
-                item(label: "Chapters") { Image(systemName: "list.bullet") }
-            }
-        }
-        .buttonStyle(PressStyle())
     }
 
     private var sleepLabel: String {
@@ -419,16 +438,12 @@ struct PlayerScreen: View {
         return player.sleep == .endOfChapter ? "Chapter end" : "Sleep"
     }
 
-    private func item(on: Bool = false, label: String, @ViewBuilder icon: () -> some View) -> some View {
-        VStack(spacing: 3) {
-            icon()
-                .font(.system(size: 17, weight: .medium))
-                .frame(width: 46, height: 32)
-                .background(on ? ink.opacity(0.16) : .clear, in: Capsule())
-            Text(label).font(.caption2.weight(.medium)).foregroundStyle(muted).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
+    private func item(on: Bool = false, @ViewBuilder icon: () -> some View) -> some View {
+        icon()
+            .font(.system(size: 16, weight: .medium))
+            .frame(width: 40, height: 40)
+            .background(on ? ink.opacity(0.16) : .clear, in: Circle())
+            .contentShape(Rectangle())
     }
 
     static func speedLabel(_ s: Float) -> String { s == 1 ? "1×" : String(format: "%g×", s) }

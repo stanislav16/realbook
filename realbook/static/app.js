@@ -1543,7 +1543,7 @@ function glassState() {
     playing: !$("#icon-pause").classList.contains("hidden"), loading: $("#play").classList.contains("loading"),
     speed: $("#speed-label").textContent, sleep: $("#sleep-btn > span:last-child").textContent,
     sleepOn: $("#sleep-btn").classList.contains("on"), textOn: $("#text-btn").classList.contains("on"), tocOn: $("#toc-btn").classList.contains("on"),
-    dark: 0.3 * r + 0.6 * g + 0.1 * b < 128,
+    text: reader.classList.contains("text-view"), bg: [r, g, b], dark: 0.3 * r + 0.6 * g + 0.1 * b < 128,
   };
 }
 
@@ -1567,7 +1567,7 @@ function glassScrub(line, ended) {
 function nativeMenu(anchor, items) {
   const r = anchor.getBoundingClientRect();
   S.glassItems = items.filter(Boolean);
-  window.pywebview.api.glass_menu({ x: r.left, y: r.top, w: r.width, h: r.height, items: S.glassItems.map((it) => it === "-" ? null : {
+  window.pywebview.api.glass_menu({ x: r.left, y: r.top, w: r.width, h: r.height, player: !!anchor.closest("#player"), items: S.glassItems.map((it) => it === "-" ? null : {
     label: it.label, disabled: !!it.disabled, danger: !!it.danger, note: it.note || "", dot: it.dot || "" }) });
 }
 function glassMenuClosed(i) { if (i >= 0) S.glassItems[i].action(); }

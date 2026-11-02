@@ -17,11 +17,16 @@ import Quartz  # noqa: F401  so that colours for layers come through as what the
 from Foundation import NSMakePoint, NSMakeRect, NSObject
 from PyObjCTools import AppHelper
 
-RADIUS = 28
-SIDE = 20  # the controls' margin inside the glass
+RADIUS = 26
+SIDE = 16  # the controls' margin inside the glass
 FADE_SECONDS = 0.15
-ROW_ICON = (40, 24)
-ROW_ITEMS = (("speed-btn", "Speed", None), ("sleep-btn", "Sleep", "moon"), ("text-btn", "Text", "text.alignleft"), ("toc-btn", "Chapters", "list.bullet"))
+TINT = 0.5  # how much of the page's colour is in the glass over text, so lines behind it don't show as bands
+ICON = (40, 34)
+PLAY_SIZE = 46
+SMALL = 40  # a control's size; each is a circle of this when hovered or on
+# Either side of play: the same controls as the page's, by its ids. Icons only, to keep it small.
+LEFT = (("speed-btn", "Playback speed", None), ("sleep-btn", "Stop playing after a while", "moon"))
+RIGHT = (("text-btn", "Show the text (⌘3)", "text.alignleft"), ("toc-btn", "Chapters (⌘1)", "list.bullet"))
 
 
 def available() -> bool:
@@ -37,35 +42,24 @@ def _symbol(name: str, size: float, weight=AppKit.NSFontWeightRegular) -> AppKit
     return image.imageWithSymbolConfiguration_(AppKit.NSImageSymbolConfiguration.configurationWithPointSize_weight_(size, weight))
 
 
-def _row_icon(draw_inside) -> AppKit.NSImage:
-    """All the same size, so the labels under them line up."""
-    image = AppKit.NSImage.imageWithSize_flipped_drawingHandler_(ROW_ICON, False, draw_inside)
+def _icon(draw_inside) -> AppKit.NSImage:
+    """All the same size, so they sit alike whatever is in them."""
+    image = AppKit.NSImage.imageWithSize_flipped_drawingHandler_(ICON, False, draw_inside)
     image.setTemplate_(True)
     return image
 
 
-def _row_symbol(name: str) -> AppKit.NSImage:
-    symbol = _symbol(name, 17)
-    size = symbol.size()
-
-    def draw(rect):
-        symbol.drawInRect_(NSMakeRect((ROW_ICON[0] - size.width) / 2, (ROW_ICON[1] - size.height) / 2, size.width, size.height))
-        return True
-
-    return _row_icon(draw)
-
-
-def _row_text(text: str) -> AppKit.NSImage:
-    """Text as an icon: the speed sits where the other buttons have theirs."""
-    attrs = {AppKit.NSFontAttributeName: AppKit.NSFont.systemFontOfSize_weight_(15, AppKit.NSFontWeightSemibold)}
+def _text_icon(text: str, size: float = 14) -> AppKit.NSImage:
+    """Text as an icon: the speed, and the sleep timer's time left."""
+    attrs = {AppKit.NSFontAttributeName: AppKit.NSFont.monospacedDigitSystemFontOfSize_weight_(size, AppKit.NSFontWeightSemibold)}
     string = AppKit.NSAttributedString.alloc().initWithString_attributes_(text, attrs)
-    size = string.size()
+    measured = string.size()
 
     def draw(rect):
-        string.drawAtPoint_(NSMakePoint((ROW_ICON[0] - size.width) / 2, (ROW_ICON[1] - size.height) / 2))
+        string.drawAtPoint_(NSMakePoint((ICON[0] - measured.width) / 2, (ICON[1] - measured.height) / 2))
         return True
 
-    return _row_icon(draw)
+    return _icon(draw)
 
 
 class _Flipped(AppKit.NSView):
@@ -74,7 +68,10 @@ class _Flipped(AppKit.NSView):
 
 
 class _Press(AppKit.NSButton):
-    """Answers the moment it's pressed, and doesn't take the keyboard from the page (space is play)."""
+    """Answers the moment it's pressed, lights up under the pointer like a bead of the same glass, and
+    doesn't take the keyboard from the page (space is play)."""
+
+    hovering = on = solid = False
 
     def acceptsFirstMouse_(self, event):
         return True
@@ -83,6 +80,34 @@ class _Press(AppKit.NSButton):
         self.setAlphaValue_(0.55)
         objc.super(_Press, self).mouseDown_(event)  # returns when the button is let go
         self.setAlphaValue_(1.0)
+
+    def updateTrackingAreas(self):
+        objc.super(_Press, self).updateTrackingAreas()
+        for area in list(self.trackingAreas()):
+            self.removeTrackingArea_(area)
+        options = AppKit.NSTrackingMouseEnteredAndExited | AppKit.NSTrackingActiveInKeyWindow | AppKit.NSTrackingInVisibleRect
+        self.addTrackingArea_(AppKit.NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(self.bounds(), options, self, None))
+
+    def mouseEntered_(self, event):
+        self.hovering = True
+        self.repaint()
+
+    def mouseExited_(self, event):
+        self.hovering = False
+        self.repaint()
+
+    def repaint(self):
+        layer = self.layer()
+        if self.solid:
+            self.setAlphaValue_(0.88 if self.hovering else 1.0)
+            return
+        strength = 0.2 if self.on and self.hovering else 0.16 if self.on else 0.1 if self.hovering else 0
+        dark = "Dark" in str(self.effectiveAppearance().name())
+        ink = AppKit.NSColor.whiteColor() if dark else AppKit.NSColor.blackColor()
+        layer.setBackgroundColor_(ink.colorWithAlphaComponent_(strength).CGColor() if strength else None)
+        # Light along the edge: what makes it read as glass rather than a grey patch.
+        layer.setBorderWidth_(0.5 if strength else 0)
+        layer.setBorderColor_(AppKit.NSColor.whiteColor().colorWithAlphaComponent_(0.28 if dark else 0.7).CGColor())
 
 
 class _Slider(AppKit.NSSlider):
@@ -109,11 +134,11 @@ class Player:
         self.web = window.contentView()
         self.target = _Target.alloc().initWithOwner_(self)
         self.dragging = False
+        self.pressed = ""
         self.shown: dict = {}
-        self.pills: dict[str, AppKit.NSView] = {}
         self.items: dict[str, AppKit.NSButton] = {}
 
-        self.glass = objc.lookUpClass("NSGlassEffectView").alloc().initWithFrame_(NSMakeRect(0, 0, 600, 180))
+        self.glass = objc.lookUpClass("NSGlassEffectView").alloc().initWithFrame_(NSMakeRect(0, 0, 500, 104))
         self.glass.setCornerRadius_(RADIUS)
         self.glass.setHidden_(True)
         self.content = _Flipped.alloc().initWithFrame_(self.glass.bounds())
@@ -125,29 +150,19 @@ class Player:
         self.slider.setContinuous_(True)
         self.slider.setRefusesFirstResponder_(True)
         self.slider.setAccessibilityLabel_("Line in this chapter")
-        self.left, self.right = self._label(11), self._label(11)
+        self.left, self.right = self._label(10.5), self._label(10.5)
         self.right.setAlignment_(AppKit.NSTextAlignmentRight)
         for view in (self.slider, self.left, self.right):
             self.content.addSubview_(view)
 
-        self.prev = self._control("prev", "backward.end.fill", "Previous line", 21)
-        self.next = self._control("next", "forward.end.fill", "Next line", 21)
-        self.play = self._control("play", "play.fill", "Play or pause", 24)
-        self.play.setWantsLayer_(True)
-        self.play.layer().setCornerRadius_(30)
+        self.prev = self._control("prev", "backward.end.fill", "Previous line (←)", 17)
+        self.next = self._control("next", "forward.end.fill", "Next line (→)", 17)
+        self.play = self._control("play", "play.fill", "Play / pause (space)", 19)
+        self.play.solid = True
+        self.play.layer().setCornerRadius_(PLAY_SIZE / 2)
         self._icon = "play.fill"
-        for ident, title, icon in ROW_ITEMS:
-            pill = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, 46, 28))
-            pill.setWantsLayer_(True)
-            pill.layer().setCornerRadius_(14)
-            self.content.addSubview_(pill)
-            self.pills[ident] = pill
-            button = self._control(ident, icon or "circle", title, 17)
-            button.setImage_(_row_symbol(icon or "circle"))
-            button.setTitle_(title)
-            button.setFont_(AppKit.NSFont.systemFontOfSize_(10.5))
-            button.setImagePosition_(AppKit.NSImageAbove)
-            self.items[ident] = button
+        for ident, title, icon in LEFT + RIGHT:
+            self.items[ident] = self._control(ident, icon or "circle", title, 16)
         self.web.addSubview_positioned_relativeTo_(self.glass, AppKit.NSWindowAbove, None)
 
     def _label(self, size: float) -> AppKit.NSTextField:
@@ -157,9 +172,12 @@ class Player:
         return label
 
     def _control(self, ident: str, icon: str, label: str, size: float) -> _Press:
-        button = _Press.alloc().initWithFrame_(NSMakeRect(0, 0, 46, 46))
+        button = _Press.alloc().initWithFrame_(NSMakeRect(0, 0, SMALL, SMALL))
+        button.setWantsLayer_(True)
+        button.layer().setCornerRadius_(SMALL / 2)
         button.setBordered_(False)
         button.setTitle_("")
+        button.setToolTip_(label)
         button.setImage_(_symbol(icon, size))
         button.setImagePosition_(AppKit.NSImageOnly)
         button.setContentTintColor_(AppKit.NSColor.labelColor())
@@ -192,18 +210,23 @@ class Player:
             self.slider.setDoubleValue_(state["value"])
         if changed("playing"):
             self._icon = "pause.fill" if state["playing"] else "play.fill"
-            self.play.setImage_(_symbol(self._icon, 24))
+            self.play.setImage_(_symbol(self._icon, 19))
         if changed("loading"):
             self.play.setAlphaValue_(0.6 if state["loading"] else 1.0)
         if changed("speed"):
-            self.items["speed-btn"].setImage_(_row_text(state["speed"]))
-        if changed("sleep"):
-            self.items["sleep-btn"].setTitle_(state["sleep"])
+            self.items["speed-btn"].setImage_(_text_icon(state["speed"]))
+        if changed("sleep", "sleepOn"):
+            self.items["sleep-btn"].setImage_(_text_icon(state["sleep"], 11) if state["sleepOn"] else _symbol("moon", 16))
         if changed("sleepOn", "textOn", "tocOn", "dark"):
             on = {"sleep-btn": state["sleepOn"], "text-btn": state["textOn"], "toc-btn": state["tocOn"], "speed-btn": False}
-            fill = (AppKit.NSColor.whiteColor() if state["dark"] else AppKit.NSColor.blackColor()).colorWithAlphaComponent_(0.14).CGColor()
-            for ident, pill in self.pills.items():
-                pill.layer().setBackgroundColor_(fill if on[ident] else None)
+            for ident, button in self.items.items():
+                button.on = on[ident]
+                button.repaint()
+            self.prev.repaint()
+            self.next.repaint()
+        if changed("text", "bg"):
+            r, g, b = (c / 255 for c in state["bg"])
+            self.glass.setTintColor_(AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, TINT) if state["text"] else None)
 
     def _appearance(self, dark: bool) -> None:
         self.glass.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua if dark else AppKit.NSAppearanceNameAqua))
@@ -241,19 +264,19 @@ class Player:
     def _layout(self, w: float, h: float) -> None:
         self.content.setFrame_(NSMakeRect(0, 0, w, h))
         inner = w - 2 * SIDE
-        self.slider.setFrame_(NSMakeRect(SIDE, 8, inner, 20))
-        self.left.setFrame_(NSMakeRect(SIDE, 30, inner / 2, 15))
-        self.right.setFrame_(NSMakeRect(w / 2, 30, inner / 2, 15))
-        middle = 78
-        self.play.setFrame_(NSMakeRect(w / 2 - 30, middle - 30, 60, 60))
-        self.prev.setFrame_(NSMakeRect(w / 2 - 30 - 40 - 46, middle - 23, 46, 46))
-        self.next.setFrame_(NSMakeRect(w / 2 + 30 + 40, middle - 23, 46, 46))
-        step = inner / len(ROW_ITEMS)
-        top = h - 56
-        for i, (ident, _, _) in enumerate(ROW_ITEMS):
-            x = SIDE + i * step
-            self.items[ident].setFrame_(NSMakeRect(x, top, step, 50))
-            self.pills[ident].setFrame_(NSMakeRect(x + step / 2 - 23, top - 4, 46, 28))
+        self.slider.setFrame_(NSMakeRect(SIDE, 6, inner, 20))
+        self.left.setFrame_(NSMakeRect(SIDE + 2, 26, inner / 2, 14))
+        self.right.setFrame_(NSMakeRect(w / 2 - 2, 26, inner / 2, 14))
+        middle = h - 9 - PLAY_SIZE / 2
+        centre = w / 2
+        self.play.setFrame_(NSMakeRect(centre - PLAY_SIZE / 2, middle - PLAY_SIZE / 2, PLAY_SIZE, PLAY_SIZE))
+        place = lambda view, x: view.setFrame_(NSMakeRect(x, middle - SMALL / 2, SMALL, SMALL))
+        place(self.prev, centre - PLAY_SIZE / 2 - 8 - SMALL)
+        place(self.next, centre + PLAY_SIZE / 2 + 8)
+        for i, (ident, _, _) in enumerate(LEFT):
+            place(self.items[ident], SIDE + i * (SMALL + 4))
+        for i, (ident, _, _) in enumerate(RIGHT):
+            place(self.items[ident], w - SIDE - SMALL - (len(RIGHT) - 1 - i) * (SMALL + 4))
 
     # ---------------------------------------------------------------- what the person does
 
@@ -261,6 +284,7 @@ class Player:
         self.web.evaluateJavaScript_completionHandler_(code, None)
 
     def press(self, ident: str) -> None:
+        self.pressed = ident
         self.js(f"document.getElementById({json.dumps(ident)}).click()")
 
     def slid(self, slider) -> None:
@@ -292,11 +316,15 @@ class Player:
                     it["label"], {AppKit.NSForegroundColorAttributeName: AppKit.NSColor.systemRedColor()}))
             if it.get("dot"):
                 item.setImage_(_dot(it["dot"]))
+        x, top, bottom = spec["x"], spec["y"], spec["y"] + spec["h"]
+        if spec.get("player") and self.pressed in self.items:  # the page's button is hidden elsewhere: at the one pressed
+            frame = self.items[self.pressed].convertRect_toView_(self.items[self.pressed].bounds(), self.web)
+            x, top, bottom = frame.origin.x, frame.origin.y, frame.origin.y + frame.size.height
         # Above a button low in the window, as the player's are; below one anywhere else.
-        y = spec["y"] + spec["h"] + 4
+        y = bottom + 4
         if y + menu.size().height > self.web.bounds().size.height - 8:
-            y = spec["y"] - menu.size().height - 4
-        menu.popUpMenuPositioningItem_atLocation_inView_(None, NSMakePoint(spec["x"], y), self.web)  # returns once it's closed
+            y = top - menu.size().height - 4
+        menu.popUpMenuPositioningItem_atLocation_inView_(None, NSMakePoint(x, y), self.web)  # returns once it's closed
         self.js(f"glassMenuClosed({chosen[0] if chosen else -1})")
 
 

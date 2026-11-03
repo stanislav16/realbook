@@ -740,17 +740,18 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
             acceptable = lambda s: likeness(s) >= min(best, how.min_likeness)
 
     # About one line in six stops while its last sound is still going (the model ends a frame too
-    # soon), which sounds clipped, and about one statement in a hundred ends rising like a question.
-    # Those are made again, up to twice, keeping the best ending (of the takes that are still the
-    # same person).
-    statement = re.search(r"[.!][\"”’')\]]*\s*$", text) is not None
+    # soon), which sounds clipped; some statements end rising like a question, and many yes/no
+    # questions end flat like a statement. Those are made again, keeping the best ending (of the
+    # takes that are still the same person).
+    tune = intonation(text)
 
-    def faults(s: np.ndarray) -> tuple[int, float]:  # sounding like a question is worse than a clipped end
-        clipped, rising = _ending(s) > CUT_DB, statement and _end_rise(s) > MAX_STATEMENT_RISE
+    def faults(s: np.ndarray) -> tuple[int, float, float]:  # the wrong tune is worse than a clipped end
+        clipped, rise = _ending(s) > CUT_DB, _end_rise(s) if tune else 1.0
+        off = max(0.0, rise - MAX_STATEMENT_RISE) if tune == "statement" else max(0.0, MIN_QUESTION_RISE - rise)
         ran_on = _dots_gaps(s, text)[1] if SPACED_DOTS in text else 0  # ran straight through the dots
-        return int(clipped) + 2 * int(rising) + ran_on, _ending(s)
+        return int(clipped) + 2 * int(off > 0) + ran_on, off, _ending(s)
 
-    for _ in range(CUT_RETRIES):
+    for _ in range(TUNE_RETRIES if tune == "question" else CUT_RETRIES):
         if not faults(samples)[0]:
             break
         again = generate()
@@ -769,11 +770,30 @@ CUT_RETRIES = 2
 # clip's silent end) 18%.
 CUT_DB = -28
 SPEECH_DB = -40
-# A statement's last 200 ms of speech this much higher than the 600 ms before sounds like a question
-# ("…with a slip-tip." climbed to 1.7 times). Of Dune's saved statements 1% went above it; questions
-# themselves never went past 1.5.
-MAX_STATEMENT_RISE = 1.4
+# A line's last 200 ms of voice against the 600 ms before (see _end_rise). Of 476 saved statements
+# the middle half ended between 0.89 and 1.04; 7% went past 1.15 and sound like questions ("This is
+# a harvester factory." at 1.29). Yes/no questions read well ended at a median 1.15, but 44% of them
+# stayed under 1.1 and sound like statements ("Do you dream every night?" at 1.01).
+MAX_STATEMENT_RISE = 1.15
+MIN_QUESTION_RISE = 1.1
+TUNE_RETRIES = 3  # a flat question is common, so it gets one more try
+TUNE_VERSION = 1  # in the name of the audio of questions: bump to make only those again
 FADE_IN_MS, FADE_OUT_MS, TAIL_MS = 5, 40, 40
+# A question asking who, what, where… falls at the end in English, like a statement, so it's left
+# as read; one asking yes or no ("Do you…?", "Nothing to identify him?") rises.
+WH_QUESTION = re.compile(r"^\W*(?:(?:and|but|so|well|then|oh|now|or)\W+)*"
+                         r"(?:who|whom|whose|what|whatever|where|when|why|how|which)\b", re.IGNORECASE)
+CLOSERS = "\"”’')]"
+
+
+def intonation(text: str) -> str:
+    """How the end of `text` should sound: "statement" (falls or stays level), "question" (rises), or
+    "" (anything goes: a wh-question, a line trailing off)."""
+    end = text.rstrip(CLOSERS + " ")
+    if end.endswith("?"):
+        sentences = re.split(r"(?<=[.!?…])\s+", end.replace(SPACED_DOTS, "…").strip(CLOSERS + "“‘ "))
+        return "" if WH_QUESTION.match(sentences[-1].lstrip(CLOSERS + "“‘ ")) else "question"
+    return "statement" if end.endswith((".", "!")) and not end.endswith(SPACED_DOTS) else ""
 
 
 def _ending(samples: np.ndarray) -> float:

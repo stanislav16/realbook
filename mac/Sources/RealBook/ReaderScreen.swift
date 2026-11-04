@@ -442,6 +442,7 @@ struct SpeakerPicker: View {
 
     var body: some View {
         let cast = (reader.book?.cast ?? []).filter { search.isEmpty || $0.name.lowercased().contains(search.lowercased()) }
+        let current = reader.segments.first { $0.id == line }?.speaker  // ticked, as on the iPhone
         VStack(spacing: 0) {
             TextField("Search characters", text: $search).textFieldStyle(.roundedBorder).padding(12)
             List {
@@ -454,6 +455,7 @@ struct SpeakerPicker: View {
                             Circle().fill(Color(nsColor: NSColor(hex: reader.colors[member.id] ?? "#888888"))).frame(width: 9, height: 9)
                             Text(member.name)
                             Spacer()
+                            if member.id == current { Image(systemName: "checkmark").foregroundStyle(.secondary) }
                         }
                         .contentShape(Rectangle())
                     }
@@ -462,7 +464,14 @@ struct SpeakerPicker: View {
                 Button {
                     Task { await reader.setSpeaker(nil, line: line) }
                     dismiss()
-                } label: { Text("Unknown (narrator reads it)").foregroundStyle(.secondary) }
+                } label: {
+                    HStack {
+                        Text("Unknown (narrator reads it)").foregroundStyle(.secondary)
+                        Spacer()
+                        if current == nil { Image(systemName: "checkmark").foregroundStyle(.secondary) }
+                    }
+                    .contentShape(Rectangle())
+                }
                     .buttonStyle(.plain)
                 Button("New Character…") { creating = true }.buttonStyle(.plain)
             }

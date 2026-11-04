@@ -22,6 +22,8 @@ enum DebugScript {
             case "play": model.reader?.play()
             case "pause": model.reader?.pause()
             case "next": model.reader?.step(1)
+            case "prev": model.reader?.step(-1)
+            case "chapter": model.reader.map { r in r.goTo(chapter: arg == "next" ? r.chapter + 1 : Int(arg) ?? 0) }
             case "panel": NotificationCenter.default.post(name: .togglePanel, object: arg)
             case "away": model.reader?.following = false
             case "state": print("[state]", model.reader.map { "ch \($0.chapter) line \($0.segment)/\($0.segments.count) playing \($0.playing) loading \($0.loading) problem \($0.problem ?? "-")" } ?? "no book", "books", model.books.count, "filter", model.filter.rawValue)

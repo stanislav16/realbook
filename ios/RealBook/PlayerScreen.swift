@@ -450,7 +450,7 @@ struct PlayerScreen: View {
 
     #if DEBUG
     /// For trying the screen in the simulator: `-view text`, `-sheet cast|look|chapters|who`, and
-    /// `-script "play,wait 5,pause,..."`, which presses the buttons and prints where playback is.
+    /// `-script "play,wait 5,pause,..."` (also `prev`, `sleep chapter`), which presses the buttons and prints where playback is.
     private func debugScript() async {
         if let v = UserDefaults.standard.string(forKey: "view") { showText = v == "text" }
         try? await Task.sleep(for: .seconds(3))
@@ -467,6 +467,8 @@ struct PlayerScreen: View {
             case "play": player.play()
             case "pause": player.pause()
             case "next": player.nextLine()
+            case "prev": player.previousLine()
+            case "sleep": player.setSleep(step[1] == "chapter" ? .endOfChapter : .minutes(Int(step[1]) ?? 0))
             case "tap": player.play(from: Int(step[1]) ?? 0)
             case "chapter": player.goTo(chapter: Int(step[1]) ?? 0)
             case "wait": try? await Task.sleep(for: .seconds(Double(step[1]) ?? 1))

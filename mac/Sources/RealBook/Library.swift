@@ -90,7 +90,7 @@ struct LibraryScreen: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("CONTINUE LISTENING").font(.caption.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
                 Text(book.title).font(.system(.title3, design: .serif).weight(.semibold)).lineLimit(2)
-                Text([book.author, "Chapter \(book.position.chapter + 1) of \(book.chapters)", "\(Int(book.progress * 100))%"].filter { !$0.isEmpty }.joined(separator: " · "))
+                Text([book.author, "Chapter \(book.position.chapter + 1) of \(book.chapters)", "\(percent(book.progress))%"].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 ProgressView(value: book.progress).frame(maxWidth: 320)
                 Button("Resume", systemImage: "play.fill") { model.open(book.id, play: true) }
@@ -115,7 +115,7 @@ struct LibraryScreen: View {
                     Text("Finished").font(.caption).foregroundStyle(.secondary)
                 } else if book.progress > 0 {
                     ProgressView(value: book.progress).controlSize(.small)
-                    Text("\(Int(book.progress * 100))%").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    Text("\(percent(book.progress))%").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 } else {
                     Text("NEW").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 1).background(Color(nsColor: .labelColor), in: Capsule()).foregroundStyle(Color(nsColor: .windowBackgroundColor))
                 }
@@ -253,7 +253,7 @@ struct BookInfo: View {
                 row("Chapters", String(book.chapters))
                 row("Characters", "\(book.characters ?? 0) with their own voice")
                 row("Found by", book.analyzer == "claude" ? "Claude" : "RealBook's built-in character finder")
-                row("Progress", book.finished == true ? "Finished" : "\(Int(book.progress * 100))%")
+                row("Progress", book.finished == true ? "Finished" : "\(percent(book.progress))%")
                 if let created = book.created { row("Added", Date(timeIntervalSince1970: created).formatted(date: .abbreviated, time: .omitted)) }
             }
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
@@ -266,3 +266,6 @@ struct BookInfo: View {
         GridRow { Text(k).foregroundStyle(.secondary); Text(v) }
     }
 }
+
+/// How far through, as on the iPhone: a book that's been started shows at least 1%.
+func percent(_ progress: Double) -> Int { progress > 0 ? max(1, Int(progress * 100)) : 0 }

@@ -19,6 +19,10 @@ final class Library {
     /// The book open in the player: its next hours are the ones saved here.
     var listening: String?
     private var keeping: (id: String, task: Task<Void, Never>)?
+    /// An offline copy is about to be removed or replaced, and once it has: the player lets go of it
+    /// and then carries on from the same line.
+    @ObservationIgnored var copyChanging: ((String) -> Void)?
+    @ObservationIgnored var copyChanged: ((String) -> Void)?
     private var unsent = Set(UserDefaults.standard.stringArray(forKey: "unsentPositions") ?? [])  // listened to away from the Mac
     private static let remoteFile = folder.deletingLastPathComponent().appendingPathComponent("remote.json")
 
@@ -268,10 +272,7 @@ final class Library {
         downloads[r.id] = 0
         defer { downloads[r.id] = nil }
         let folder = Self.folder(of: r.id)
-        // When replacing a copy, where the reader was in it, in the Mac's terms: the new copy's lines
-        // may start at other times.
-        let old = book(r.id)
-        let oldSpot = old.flatMap { o in timeline(r.id).flatMap { $0.lines.isEmpty ? nil : $0.macPosition(at: o.positionMs) } }
+        var letGo = false
         let staging = Self.folder.appendingPathComponent(".\(r.id)-download", isDirectory: true)
         do {
             try? FileManager.default.removeItem(at: staging)
@@ -285,6 +286,12 @@ final class Library {
                 self?.downloads[r.id] = p
             }
             let timeline = try JSONDecoder().decode(Timeline.self, from: Data(contentsOf: staging.appendingPathComponent("timeline.json")))
+            // When replacing a copy, where the reader is in it now, in the Mac's terms: the new copy's
+            // lines may start at other times.
+            copyChanging?(r.id)
+            letGo = true
+            let old = book(r.id)
+            let oldSpot = old.flatMap { o in self.timeline(r.id).flatMap { $0.lines.isEmpty ? nil : $0.macPosition(at: o.positionMs) } }
             try? FileManager.default.removeItem(at: folder)
             try FileManager.default.moveItem(at: staging, to: folder)
             timelines[r.id] = timeline
@@ -303,8 +310,13 @@ final class Library {
             books.sort { $0.positionUpdated > $1.positionUpdated }
         } catch {
             try? FileManager.default.removeItem(at: staging)
+            if letGo {  // the old copy may be gone with it
+                books.removeAll { $0.id == r.id && !FileManager.default.fileExists(atPath: Self.audio(of: r.id).path) }
+                timelines[r.id] = nil
+            }
             lastError = error.localizedDescription
         }
+        if letGo { copyChanged?(r.id) }
     }
 
     func makeOfflineCopy(_ r: RemoteBook) async {
@@ -317,8 +329,23 @@ final class Library {
     }
 
     func remove(_ id: String) {
+        copyChanging?(id)
         try? FileManager.default.removeItem(at: Self.folder(of: id))
         books.removeAll { $0.id == id }
         timelines[id] = nil
+        copyChanged?(id)
+    }
+
+    /// Unpairs: the Mac's books leave the shelf, and nothing more is asked of it.
+    func forgetMac() {
+        mac.unpair()
+        keeping?.task.cancel()
+        keeping = nil
+        remote = []
+        saveRemote()
+        reachable = false
+        lastError = nil
+        unsent = []
+        UserDefaults.standard.removeObject(forKey: "unsentPositions")
     }
 }

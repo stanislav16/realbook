@@ -109,8 +109,7 @@ struct LibraryView: View {
                     Menu {
                         Button("Pair Again", systemImage: "qrcode.viewfinder") { pairing = true }
                         Button("Forget This Mac", systemImage: "xmark.circle", role: .destructive) {
-                            library.mac.unpair()
-                            Task { await library.sync() }
+                            library.forgetMac()
                         }
                     } label: {
                         Image(systemName: library.reachable ? "laptopcomputer" : "laptopcomputer.slash")

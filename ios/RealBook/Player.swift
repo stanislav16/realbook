@@ -87,6 +87,9 @@ final class Player {
     private var gapTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var lastMoved = 0.0  // when the reader last moved here, to tell if the Mac's position is newer
+    private var resumeAfterInterruption = false
+    /// Where the reader was when the offline copy playing was taken away, to carry on from there.
+    private var heldSpot: (id: String, chapter: Int, segment: Int, playing: Bool)?
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
@@ -98,9 +101,26 @@ final class Player {
         NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.pause() }
         }
+        // A call or Siri pauses the book; it carries on afterwards if the system says it should.
         NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
-            MainActor.assumeIsolated { if type == .began { self?.pause() } }
+            let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if type == .began {
+                    self.resumeAfterInterruption = self.playing
+                    self.pause()
+                } else if type == .ended {
+                    if options.contains(.shouldResume) && self.resumeAfterInterruption { self.play() }
+                    self.resumeAfterInterruption = false
+                }
+            }
+        }
+        // Headphones unplugged or AirPods gone: pause, rather than carry on out loud (live lines) or
+        // stop while still showing as playing (the offline copy, which AVPlayer pauses by itself).
+        NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init)
+            MainActor.assumeIsolated { if reason == .oldDeviceUnavailable { self?.pause() } }
         }
         finished.done = { [weak self] in self?.lineEnded() }
         setUpRemoteCommands()
@@ -113,6 +133,8 @@ final class Player {
     /// Opens a book: its offline copy if this iPhone has one, else live from the Mac.
     func open(_ id: String, library: Library, play start: Bool = false) {
         self.library = library
+        library.copyChanging = { [weak self] in self?.letGoOfCopy($0) }
+        library.copyChanged = { [weak self] in self?.copyChanged($0) }
         library.listening = id
         guard bookID != id else {
             if start && !playing { play() }
@@ -351,7 +373,11 @@ final class Player {
             seek(to: t.lines[ms - t.lines[i].ms > 1500 ? i : max(0, i - 1)].ms)
         case .live:
             let restart = (live?.currentTime ?? 0) > 1.5
-            goToLine(restart ? segment : segment - 1)
+            if !restart && segment == 0 && chapter > 0 {
+                moveLive(chapter: chapter - 1, segment: Int.max / 2)  // the last line of the chapter before
+            } else {
+                goToLine(restart ? segment : segment - 1)
+            }
         }
     }
 
@@ -362,7 +388,11 @@ final class Player {
             let i = t.lineIndex(at: ms)
             if i + 1 < t.lines.count { seek(to: t.lines[i + 1].ms) }
         case .live:
-            goToLine(segment + 1)
+            if segment + 1 >= segments.count {
+                if chapter + 1 < chapterTitles.count { moveLive(chapter: chapter + 1, segment: 0) }
+            } else {
+                goToLine(segment + 1)
+            }
         }
     }
 
@@ -390,18 +420,23 @@ final class Player {
         case .offline:
             if let c = timeline?.chapters[n] { seek(to: c.ms) }
         case .live:
-            let wasPlaying = playing
-            pause()
-            Task {
-                do {
-                    try await loadChapter(n, at: 0)
-                } catch {
-                    problem = error.localizedDescription  // stays where it was, paused, with the reason showing
-                    return
-                }
-                saveLivePosition()
-                if wasPlaying { play() }
+            moveLive(chapter: n, segment: 0)
+        }
+    }
+
+    /// Live: to a line in another chapter, carrying on playing if it was.
+    private func moveLive(chapter n: Int, segment s: Int) {
+        let wasPlaying = playing
+        pause()
+        Task {
+            do {
+                try await loadChapter(n, at: s)
+            } catch {
+                problem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription  // stays where it was, paused, with the reason showing
+                return
             }
+            saveLivePosition()
+            if wasPlaying { play() }
         }
     }
 
@@ -438,7 +473,7 @@ final class Player {
     /// Lines not made yet have no length, so this goes by words: Dune's voices read 2.65 a second, pauses included.
     private func timeLeft(_ line: Int) -> String {
         guard wordsLeft.indices.contains(line) else { return "" }
-        let minutes = Int((Double(wordsLeft[line]) / 2.65 / Double(speed) / 60).rounded())
+        let minutes = Int((Double(wordsLeft[line]) / Kept.wordsPerSecond / Double(speed) / 60).rounded())
         return minutes < 1 ? "Under a minute left" : "About \(minutes) min left"
     }
 
@@ -448,6 +483,29 @@ final class Player {
     }
 
     // MARK: - offline copy
+
+    /// The offline copy of this book is about to be removed or replaced: let go of its file,
+    /// remembering where the reader is.
+    func letGoOfCopy(_ id: String) {
+        guard bookID == id, mode == .offline, let t = timeline, !t.lines.isEmpty else { return }
+        let spot = t.macPosition(at: ms)
+        heldSpot = (id, spot.chapter, spot.segment, playing)
+        stopAll()
+    }
+
+    /// Carries on from the same line: in the new copy, or live from the Mac if the copy is gone.
+    func copyChanged(_ id: String) {
+        guard let held = heldSpot, held.id == id, bookID == id, let library else { return }
+        heldSpot = nil
+        if let book = library.book(id), let t = library.timeline(id), !t.lines.isEmpty {
+            startOffline(book, t, at: t.ms(chapter: held.chapter, segment: held.segment))
+            if held.playing { play() }
+            Task { await loadCast(id) }
+        } else {
+            playWhenLoaded = held.playing
+            Task { await startLive(at: held.chapter, segment: held.segment) }
+        }
+    }
 
     func seek(to target: Int, save: Bool = true) {
         let clamped = max(0, min(target, max(0, (timeline?.ms ?? 0) - 500)))
@@ -582,17 +640,20 @@ final class Player {
                 saveLivePosition()
                 playLiveLine()
             } else if chapter + 1 < chapterTitles.count {
-                let stop = sleep == .endOfChapter
-                if stop {
-                    setSleep(.off)
-                    pause()
-                }
+                // Stops at the start of the next chapter for "End of Chapter". Pausing cancels this
+                // task, so it only pauses once the chapter is loaded.
                 do {
                     try await loadChapter(chapter + 1, at: 0)
                     saveLivePosition()
-                    if !stop { playLiveLine() }
+                    if sleep == .endOfChapter {
+                        setSleep(.off)
+                        pause()
+                    } else {
+                        playLiveLine()
+                    }
+                } catch is CancellationError {
                 } catch {
-                    problem = error.localizedDescription
+                    problem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                     pause()
                 }
             } else {
@@ -848,7 +909,12 @@ final class Player {
         if let artwork { info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: artwork.size) { _ in artwork } }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         let c = MPRemoteCommandCenter.shared()
+        // The offline copy skips by time; live lines have no length yet, so live skips a line.
         c.changePlaybackPositionCommand.isEnabled = mode == .offline
+        c.skipBackwardCommand.isEnabled = mode == .offline
+        c.skipForwardCommand.isEnabled = mode == .offline
+        c.previousTrackCommand.isEnabled = mode == .live
+        c.nextTrackCommand.isEnabled = mode == .live
     }
 
     private func setUpRemoteCommands() {
@@ -860,6 +926,8 @@ final class Player {
         c.skipBackwardCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.skip(seconds: -15) }; return .success }
         c.skipForwardCommand.preferredIntervals = [30]
         c.skipForwardCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.skip(seconds: 30) }; return .success }
+        c.previousTrackCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.previousLine() }; return .success }
+        c.nextTrackCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.nextLine() }; return .success }
         c.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let e = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             MainActor.assumeIsolated { self?.seek(to: Int(e.positionTime * 1000)) }

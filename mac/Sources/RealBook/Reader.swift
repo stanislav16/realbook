@@ -59,7 +59,8 @@ final class Reader: NSObject, AVAudioPlayerDelegate {
         return segments.reversed().map { words += $0.text.split(whereSeparator: \.isWhitespace).count; return words }.reversed()
     }
 
-    /// Lines not made yet have no length, so this goes by words: Dune's voices read 2.65 a second, pauses included.
+    /// Lines not made yet have no length, so this goes by words: Dune's voices read 2.65 a second, pauses included
+    /// (the iPhone's estimates use the same rate).
     func timeLeft(from line: Int) -> String {
         guard wordsLeft.indices.contains(line) else { return "" }
         let minutes = Int((Double(wordsLeft[line]) / 2.65 / Double(speed) / 60).rounded())
@@ -92,6 +93,7 @@ final class Reader: NSObject, AVAudioPlayerDelegate {
             if n != book?.position.chapter || s != book?.position.segment { savePosition() }
             updateNowPlaying()
         } catch {
+            pause()  // not left showing Pause with nothing playing
             problem = error.localizedDescription
         }
     }
@@ -134,7 +136,12 @@ final class Reader: NSObject, AVAudioPlayerDelegate {
         updateNowPlaying()
     }
 
+    /// A line on. Back is to the start of this line, or the one before if this one only just started.
     func step(_ by: Int) {
+        if by < 0, let audio, audio.currentTime > 1.5 {
+            go(to: segment)
+            return
+        }
         let target = segment + by
         if target < 0 {
             if chapter > 0 { Task { await load(chapter: chapter - 1, segment: Int.max / 2, play: playing) } }
@@ -154,6 +161,7 @@ final class Reader: NSObject, AVAudioPlayerDelegate {
     }
 
     func goTo(chapter n: Int) {
+        guard book?.toc.indices.contains(n) == true else { return }
         Task { await load(chapter: n, play: playing) }
     }
 
@@ -289,11 +297,26 @@ final class Reader: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    /// Gives a quote (every line of it) to someone else. Only the line being read, if it changed, is
+    /// said again in the new voice, as on the iPhone.
     func setSpeaker(_ speaker: String?, line: Int) async {
+        struct Reply: Decodable { var changed: [Int]; var cast: [MacBook.Member] }
+        let n = chapter
         do {
-            try await api.data("api/books/\(id)/chapters/\(chapter)/segments/\(line)/speaker", method: "PUT", json: ["speaker": speaker as Any])
-            cached.removeAll()
-            await reloadChapter()
+            let data = try await api.data("api/books/\(id)/chapters/\(n)/segments/\(line)/speaker", method: "PUT", json: ["speaker": speaker as Any])
+            let r = try JSONDecoder().decode(Reply.self, from: data)
+            book?.cast = r.cast  // their line counts
+            guard n == chapter else { return }
+            for i in r.changed where segments.indices.contains(i) {
+                segments[i].speaker = speaker
+                cached[key(n, i)] = nil
+            }
+            let loadingLine = loading
+            // The page shows the new speakers; the lines that didn't change stay fetched.
+            let old = "\(revision)/"
+            revision += 1
+            cached = Dictionary(uniqueKeysWithValues: cached.compactMap { k, v in k.hasPrefix(old) ? ("\(revision)/" + k.dropFirst(old.count), v) : nil })
+            if playing && (r.changed.contains(segment) || loadingLine) { playCurrent() }
         } catch {
             problem = error.localizedDescription
         }
@@ -323,6 +346,16 @@ final class Reader: NSObject, AVAudioPlayerDelegate {
     }
 
     // MARK: - the system's controls
+
+    /// The book was closed: it leaves Control Center's Now Playing.
+    func disconnectSystemControls() {
+        let center = MPRemoteCommandCenter.shared()
+        for command in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand, center.nextTrackCommand, center.previousTrackCommand] {
+            command.removeTarget(nil)
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        MPNowPlayingInfoCenter.default().playbackState = .stopped
+    }
 
     func connectSystemControls() {
         let center = MPRemoteCommandCenter.shared()

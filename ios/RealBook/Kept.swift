@@ -202,7 +202,10 @@ final class Kept {
     }
 
     /// About how long these words take to hear at this speed.
-    static func minutes(words: Int, speed: Float = 1) -> Int { Int(Float(words) / 155 / max(speed, 0.1)) }
+    /// Dune's voices read 2.65 words a second, pauses included: the same rate as the time left in a chapter.
+    static let wordsPerSecond = 2.65
+
+    static func minutes(words: Int, speed: Float = 1) -> Int { Int(Double(words) / wordsPerSecond / 60 / Double(max(speed, 0.1))) }
 
     static func duration(minutes: Int) -> String {
         minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"

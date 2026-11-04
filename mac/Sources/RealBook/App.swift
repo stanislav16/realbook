@@ -27,28 +27,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Space and the arrows work the player, as long as nobody is typing: a menu's shortcut would take
     /// them from the text fields.
-    @MainActor private func keys(_ event: NSEvent) -> NSEvent? {
-        guard let model = Self.model, let reader = model.reader, event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
-              !(NSApp.keyWindow?.firstResponder is NSText), NSApp.keyWindow?.sheets.isEmpty ?? true, NSApp.modalWindow == nil else { return event }
-        switch event.keyCode {
+    /// Whether the key was used.
+    @MainActor private func keys(_ code: UInt16, _ flags: NSEvent.ModifierFlags) -> Bool {
+        guard let model = Self.model, let reader = model.reader, flags.intersection([.command, .option, .control]).isEmpty,
+              !(NSApp.keyWindow?.firstResponder is NSText), NSApp.keyWindow?.sheets.isEmpty ?? true, NSApp.modalWindow == nil else { return false }
+        switch code {
         case 49: reader.toggle()
         case 123: reader.step(-1)
         case 124: reader.step(1)
-        default: return event
+        default: return false
         }
-        return nil
+        return true
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            MainActor.assumeIsolated { self?.keys(event) ?? nil }
+            let code = event.keyCode, flags = event.modifierFlags
+            return MainActor.assumeIsolated { self?.keys(code, flags) ?? false } ? nil : event
         }
         NSApp.activate(ignoringOtherApps: true)
     }
 
     /// The iPhone may have moved on while this was in the background.
     func applicationDidBecomeActive(_ notification: Notification) {
-        MainActor.assumeIsolated { Task { await Self.model?.reader?.catchUp() } }
+        Task { @MainActor in await Self.model?.reader?.catchUp() }
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -160,6 +162,7 @@ final class AppModel {
 
     func closeBook() {
         reader?.pause()
+        reader?.disconnectSystemControls()
         reader = nil
         Task { await refreshBooks() }
     }
@@ -288,8 +291,10 @@ struct Menus: Commands {
             Button("Next Line") { model.reader?.step(1) }.disabled(model.reader == nil)
             Button("Previous Line") { model.reader?.step(-1) }.disabled(model.reader == nil)
             Divider()
-            Button("Next Chapter") { model.reader.map { $0.goTo(chapter: $0.chapter + 1) } }.keyboardShortcut(.rightArrow).disabled(model.reader == nil)
-            Button("Previous Chapter") { model.reader.map { $0.goTo(chapter: max(0, $0.chapter - 1)) } }.keyboardShortcut(.leftArrow).disabled(model.reader == nil)
+            Button("Next Chapter") { model.reader.map { $0.goTo(chapter: $0.chapter + 1) } }.keyboardShortcut(.rightArrow)
+                .disabled(model.reader.map { $0.chapter + 1 >= $0.chapterTitles.count } ?? true)
+            Button("Previous Chapter") { model.reader.map { $0.goTo(chapter: $0.chapter - 1) } }.keyboardShortcut(.leftArrow)
+                .disabled(model.reader.map { $0.chapter == 0 } ?? true)
         }
         CommandMenu("Book") {
             Button("Show Text") {

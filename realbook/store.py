@@ -402,6 +402,24 @@ def clean_pronunciations(raw: dict) -> dict[str, str]:
     return out
 
 
+def spoken_title(chapter: dict) -> str | None:
+    """What the narrator says as a chapter begins ("Chapter Seven"): its title, unless that's not a
+    heading to read ("Front Matter", "Copyright", a "(continued)" part) or its first line says it already."""
+    title = " ".join((chapter.get("title") or "").split())
+    if not title or "(continued)" in title or title.lower().startswith(
+            ("front matter", "contents", "table of contents", "copyright", "cover", "title page")):
+        return None
+    first = chapter["segments"][0]["text"] if chapter.get("segments") else ""
+    plain = lambda t: re.sub(r"\W+", " ", t).strip().lower()
+    if plain(first).startswith(plain(title)):
+        return None
+    title = " ".join(re.sub(r"\([^)]*\d[^)]*\)", " ", title).split())  # not dates: "Shaddam IV (10,134—10,202)"
+    # "CHAPTER SEVEN" read as words, not letters; Roman numerals stay as they are
+    title = " ".join(w.capitalize() if w.isupper() and len(w) > 1 and not re.fullmatch(r"[IVXLC]+[.:,]?", w) else w
+                     for w in title.split())
+    return title or None
+
+
 def spoken(book: dict, text: str) -> str:
     """`text` as the voices should say it: the book's names respelled the way they're pronounced
     ("Piter" → "Peter"), so every voice says them the same way every time."""

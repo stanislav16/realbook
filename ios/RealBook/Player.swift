@@ -85,6 +85,9 @@ final class Player {
     private var fetching: [String: Task<Data, Error>] = [:]
     private var playTask: Task<Void, Never>?
     private var gapTask: Task<Void, Never>?
+    /// Silence playing under the lines while the book plays live, so the lock screen doesn't show it
+    /// paused in the moment between one line and the next.
+    private var hum: AVAudioPlayer?
     private var saveTask: Task<Void, Never>?
     private var lastMoved = 0.0  // when the reader last moved here, to tell if the Mac's position is newer
     private var resumeAfterInterruption = false
@@ -212,6 +215,7 @@ final class Player {
 
     private func startOffline(_ book: LocalBook, _ t: Timeline, at position: Int) {
         mode = .offline
+        humming(false)  // the offline copy is one long file, with no gaps to fill
         timeline = t
         chapterTitles = t.chapters.map(\.title)
         chapterSections = t.chapters.map { $0.section ?? "" }
@@ -333,6 +337,7 @@ final class Player {
             case .offline:
                 offline.playImmediately(atRate: speed)
             case .live:
+                humming(true)
                 if let live, liveKey == key(chapter, segment), live.currentTime > 0 {
                     live.rate = speed
                     live.play()  // carry on where the line was paused
@@ -342,6 +347,31 @@ final class Player {
             }
         }
     }
+
+    private func humming(_ on: Bool) {
+        guard on else {
+            hum?.stop()
+            return
+        }
+        if hum == nil {
+            hum = try? AVAudioPlayer(data: Self.silence)
+            hum?.numberOfLoops = -1
+        }
+        if hum?.isPlaying == false { hum?.play() }
+    }
+
+    /// A second of silence as a WAV file: 8 kHz, mono, 16-bit.
+    private static let silence: Data = {
+        let samples = 8000, bytes = samples * 2
+        var d = Data()
+        func add(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
+        func add16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
+        d.append(contentsOf: Array("RIFF".utf8)); add(UInt32(36 + bytes)); d.append(contentsOf: Array("WAVEfmt ".utf8))
+        add(16); add16(1); add16(1); add(8000); add(16000); add16(2); add16(16)
+        d.append(contentsOf: Array("data".utf8)); add(UInt32(bytes))
+        d.append(Data(count: bytes))
+        return d
+    }()
 
     /// Off the main thread: it can take long enough to make the screen stutter.
     private func activateAudio() async {
@@ -356,6 +386,7 @@ final class Player {
         playWhenLoaded = false
         offline.pause()
         live?.pause()
+        humming(false)
         gapTask?.cancel()
         playTask?.cancel()
         loading = false

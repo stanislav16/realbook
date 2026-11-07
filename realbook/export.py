@@ -91,13 +91,6 @@ def cancel(book_id: str) -> dict:
     return status(book_id)
 
 
-def _spoken_title(title: str) -> str | None:
-    """Chapter headings read aloud by the narrator ("Chapter One"); not "Front Matter" or "(continued)"."""
-    if not title or "(continued)" in title or title.lower().startswith(("front matter", "contents", "copyright")):
-        return None
-    return title.title() if title.isupper() else title
-
-
 class _Caf:
     """Writes 16-bit mono PCM to a CAF file, which (unlike WAV) has no 4 GB limit."""
 
@@ -161,7 +154,7 @@ def _run(book_id: str) -> None:
         items = []  # (chapter index, text, voice settings, pause after, style, take)
         where = []  # (segment index or -1 for a heading, speaker id) for each item
         for ci, ch in enumerate(book["chapters"]):
-            heading = _spoken_title(ch["title"])
+            heading = store.spoken_title(ch)
             if heading:
                 items.append((ci, heading, narrator, GAP_TITLE, "", 0))
                 where.append((-1, None))

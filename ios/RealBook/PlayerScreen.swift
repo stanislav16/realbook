@@ -95,7 +95,14 @@ struct PlayerScreen: View {
             .animation(.easeOut(duration: 0.2), value: following)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(background)
+        .background {
+            // Solid underneath, so the library doesn't show through while the page and the cover fade
+            // into each other; it's only seen while the player is dragged down to close.
+            ZStack {
+                Color.black.clipShape(dragShape).ignoresSafeArea().opacity(dragY > 0 ? 0 : 1)
+                background
+            }
+        }
         .foregroundStyle(ink)
         .tint(ink)
         .environment(\.colorScheme, scheme)
@@ -473,6 +480,7 @@ struct PlayerScreen: View {
             case "chapter": player.goTo(chapter: Int(step[1]) ?? 0)
             case "wait": try? await Task.sleep(for: .seconds(Double(step[1]) ?? 1))
             case "away": following = false
+            case "show": showText = step[1] == "text"
             case "drag": dragY = CGFloat(Double(step[1]) ?? 0)
             case "release": finishDrag(velocity: CGFloat(Double(step[1]) ?? 0))
             case "again": await player.readAgain(segment: Int(step[1]) ?? 0)

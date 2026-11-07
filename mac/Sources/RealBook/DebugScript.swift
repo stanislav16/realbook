@@ -43,6 +43,7 @@ enum DebugScript {
                 guard let menu = NSApp.mainMenu?.items.first?.submenu,
                       let index = menu.items.firstIndex(where: { $0.title.hasPrefix("Settings") }) else { print("[settings] no menu item"); continue }
                 menu.performActionForItem(at: index)
+            case "pronunciations": NotificationCenter.default.post(name: .showPronunciations, object: nil)
             case "finder": NotificationCenter.default.post(name: .init("debugFinder"), object: nil)
             case "shot":  // the front window as it is on screen, glass included (snap can't draw the glass)
                 guard let front = NSApp.orderedWindows.first(where: { $0.isVisible && $0.contentView != nil }) else { continue }

@@ -412,9 +412,10 @@ def spoken(book: dict, text: str) -> str:
         return w.lower().replace("’", "'")  # Muad'Dib and Muad’Dib are the same name
 
     pattern = "|".join(re.escape(w).replace("’", "'").replace("'", "['’]") for w in sorted(say, key=len, reverse=True))
-    rx = re.compile(r"(?<![\w'’])(%s)(?![\w])" % pattern, re.IGNORECASE)
+    # A plural is said the same way: "the Harkonnens" as "the Harkuhnens".
+    rx = re.compile(r"(?<![\w'’])(%s)(s?)(?![\w])" % pattern, re.IGNORECASE)
     lower = {key(w): s for w, s in say.items()}
-    return rx.sub(lambda m: lower[key(m.group(1))], text)
+    return rx.sub(lambda m: lower[key(m.group(1))] + m.group(2), text)
 
 
 def voice_for(book: dict, seg: dict) -> dict:

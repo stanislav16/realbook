@@ -13,6 +13,7 @@ struct ReaderScreen: View {
     @State private var panelHeight: CGFloat = 104
     @State private var who: WhoRequest?
     @State private var exporting = false
+    @State private var pronouncing = false
     @State private var waiting = false
 
     enum Panel: String { case toc, cast }
@@ -79,6 +80,8 @@ struct ReaderScreen: View {
         .sheet(item: $who) { request in SpeakerPicker(reader: reader, line: request.id) }
         .onExitCommand { panel = nil }
         .sheet(isPresented: $exporting) { ExportSheet(reader: reader) }
+        .sheet(isPresented: $pronouncing) { PronunciationsSheet(reader: reader) { pronouncing = false } }
+        .onReceive(NotificationCenter.default.publisher(for: .showPronunciations)) { _ in pronouncing = true }
         .alert("RealBook", isPresented: Binding(get: { reader.problem != nil }, set: { if !$0 { reader.problem = nil } })) {
             Button("OK") {}
         } message: {
@@ -98,6 +101,7 @@ struct ReaderScreen: View {
                 Divider()
                 Button("Cast", systemImage: "person.2") { panel = panel == .cast ? nil : .cast }
                 Button("Text Size & Theme…", systemImage: "textformat.size") { showLook = true }
+                Button("Pronunciations…", systemImage: "character.bubble") { pronouncing = true }
                 if model.canExport {
                     Divider()
                     Button("Export Audiobook…", systemImage: "square.and.arrow.up") { exporting = true }

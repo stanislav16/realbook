@@ -115,13 +115,12 @@ struct CastPanel: View {
     @State private var confirm: Analysis?
 
     enum CastSheet: Identifiable {
-        case rename(Person), merge(Person), new, pronunciations(String), export, importReview
+        case rename(Person), merge(Person), new, export, importReview
         var id: String {
             switch self {
             case .rename(let p): "rename\(p.id)"
             case .merge(let p): "merge\(p.id)"
             case .new: "new"
-            case .pronunciations(let w): "say\(w)"
             case .export: "export"
             case .importReview: "import"
             }
@@ -214,7 +213,6 @@ struct CastPanel: View {
             }.disabled(busy || model.config["claude"] as? Bool != true)
             Divider()
             Button("Add Character…") { sheet = .new }
-            Button("Pronunciations…") { sheet = .pronunciations("") }
         } label: {
             Image(systemName: "ellipsis").frame(width: 26, height: 26).contentShape(Circle())
         }
@@ -232,7 +230,6 @@ struct CastPanel: View {
                     Menu {
                         Button("Rename…") { sheet = .rename(p) }
                         Button("Merge Into…") { sheet = .merge(p) }
-                        Button("Pronunciation…") { sheet = .pronunciations(Self.pronounceable(p.name)) }
                         Divider()
                         Button("Remove", role: .destructive) { removing = p }
                     } label: {
@@ -274,11 +271,6 @@ struct CastPanel: View {
         reader.segments.first { $0.kind == "dialogue" && $0.speaker == id && $0.text.count > 25 }?.text ?? ""
     }
 
-    private static func pronounceable(_ name: String) -> String {
-        let titles: Set<String> = ["The", "Lady", "Duke", "Baron", "Dr.", "Reverend", "Mother", "Princess", "Emperor"]
-        return name.split(separator: " ").map(String.init).first { $0.first?.isUppercase == true && !titles.contains($0) } ?? ""
-    }
-
     @ViewBuilder private func sheetView(_ which: CastSheet) -> some View {
         let done = {
             sheet = nil
@@ -294,7 +286,6 @@ struct CastPanel: View {
             Task { await drop(p, into: into) }
         }
         case .new: NewCharacterSheet(api: api, book: reader.id, done: { _ in done() })
-        case .pronunciations(let word): PronunciationsSheet(reader: reader, details: details, word: word, done: done)
         case .export: ReviewExportSheet(reader: reader) { sheet = nil }
         case .importReview: ReviewImportSheet(reader: reader, done: done)
         }
@@ -597,43 +588,74 @@ struct PronunciationsSheet: View {
     @Environment(\.dismiss) private var dismiss
     struct Row: Identifiable { let id = UUID(); var word: String; var say: String }
     let reader: Reader
-    let details: CastDetails?
-    let word: String
     let done: () -> Void
+    @State private var details: CastDetails?
     @State private var rows: [Row] = []
     @State private var problem: String?
+    @FocusState private var focused: UUID?
+    @State private var added: UUID?
+    private let rowHeight: CGFloat = 30
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Pronunciations").font(.headline)
-            Text("Voices guess at unusual names and can say them differently each time. Spell a name the way it should sound, and every voice will say it that way.").font(.callout).foregroundStyle(.secondary)
-            ScrollView {
-                VStack(spacing: 6) {
-                    ForEach($rows) { $row in
-                        HStack(spacing: 6) {
-                            TextField("As written", text: $row.word).textFieldStyle(.roundedBorder)
-                            Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
-                            TextField("Say it like", text: $row.say).textFieldStyle(.roundedBorder)
-                            Button { listen(row) } label: { Image(systemName: "play.fill").font(.system(size: 10)) }.help("Listen")
-                            Button { rows.removeAll { $0.id == row.id } } label: { Image(systemName: "xmark").font(.system(size: 10)) }.help("Remove")
+            Text("Voices guess at unusual names and can say them differently each time. Spell a name the way it should sound, and every voice will say it that way.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Text("As written").frame(maxWidth: .infinity, alignment: .leading)
+                Text("Say it like").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 18)
+                Color.clear.frame(width: 62, height: 1)
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach($rows) { $row in
+                            HStack(spacing: 6) {
+                                TextField("Name", text: $row.word).textFieldStyle(.roundedBorder).focused($focused, equals: row.id)
+                                Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
+                                TextField("Spelling", text: $row.say).textFieldStyle(.roundedBorder)
+                                Button { listen(row) } label: { Image(systemName: "play.fill").font(.system(size: 10)).frame(width: 14) }
+                                    .help("Listen").disabled(row.say.trimmingCharacters(in: .whitespaces).isEmpty)
+                                Button { rows.removeAll { $0.id == row.id } } label: { Image(systemName: "xmark").font(.system(size: 10)).frame(width: 14) }
+                                    .help("Remove")
+                            }
+                            .frame(height: rowHeight)
+                            .id(row.id)
                         }
                     }
                 }
+                // As tall as the names, up to ten of them; more scroll.
+                .frame(height: rowHeight * CGFloat(min(max(rows.count, 1), 10)))
+                .onChange(of: added) {  // a new name: show it and type into it
+                    guard let added else { return }
+                    withAnimation { proxy.scrollTo(added, anchor: .bottom) }
+                    focused = added
+                }
             }
-            .frame(maxHeight: 300)
-            Button("Add Name") { rows.append(Row(word: "", say: "")) }
-            Text("Use ordinary spelling, like “Peter” for Piter. ▶ plays it with the voice of whoever has that name.").font(.caption).foregroundStyle(.secondary)
+            Button("Add Name") {
+                let row = Row(word: "", say: "")
+                rows.append(row)
+                added = row.id
+            }
+            Text("Use ordinary spelling, like “Peter” for Piter. A plural is said the same way. ▶ plays it with the voice of whoever has that name.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") { save() }.keyboardShortcut(.defaultAction)
+                Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(details == nil)
             }
         }
         .padding(20).frame(width: 520)
-        .onAppear {
-            rows = (details?.pronunciations ?? [:]).sorted { $0.key < $1.key }.map { Row(word: $0.key, say: $0.value) }
-            if !word.isEmpty, !(details?.pronunciations ?? [:]).keys.contains(word) { rows.append(Row(word: word, say: "")) }
+        .task {
+            do {
+                details = try await reader.api.get(CastDetails.self, "api/books/\(reader.id)")
+            } catch {
+                problem = "Couldn't read this book's names: \(error.localizedDescription)"
+                return
+            }
+            rows = (details?.pronunciations ?? [:]).sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }.map { Row(word: $0.key, say: $0.value) }
             if rows.isEmpty { rows.append(Row(word: "", say: "")) }
         }
     }

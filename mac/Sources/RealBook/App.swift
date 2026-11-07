@@ -303,10 +303,13 @@ struct Menus: Commands {
             }.keyboardShortcut("3").disabled(model.reader == nil)
             Button("Show Contents") { NotificationCenter.default.post(name: .togglePanel, object: "toc") }.keyboardShortcut("1").disabled(model.reader == nil)
             Button("Show Cast") { NotificationCenter.default.post(name: .togglePanel, object: "cast") }.keyboardShortcut("2").disabled(model.reader == nil)
+            Divider()
+            Button("Pronunciations…") { NotificationCenter.default.post(name: .showPronunciations, object: nil) }.disabled(model.reader == nil)
         }
     }
 }
 
 extension Notification.Name {
     static let togglePanel = Notification.Name("realbook.togglePanel")
+    static let showPronunciations = Notification.Name("realbook.showPronunciations")
 }

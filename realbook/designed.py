@@ -754,6 +754,24 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
             samples = generate()
         else:
             acceptable = lambda s: likeness(s) >= min(best, how.min_likeness)
+    elif engine.fingerprint and short_line(text) and samples.any():
+        # A line of a word or three is often read by someone else: with so little to say, the clone
+        # drifts (one take in four of Leto's "Well, gentlemen," came out 30-70% higher than his
+        # voice). It's made again until it sounds like them, keeping the closest.
+        usual_samples, limit = _read_wav(usual), MAX_SHORT_RISE_QUESTION if intonation(text) == "question" else MAX_SHORT_RISE
+        enough = MIN_ONE_WORD_LIKENESS if len(text.split()) == 1 else MIN_SHORT_LIKENESS
+
+        def score(s: np.ndarray) -> float:  # how alike, much less when it's too high to be them
+            return _likeness(engine, s, usual_samples) - max(0.0, _pitch_rise(s, usual_samples) - limit)
+
+        best = score(samples)
+        for _ in range(SHORT_RETRIES):
+            if best >= enough:
+                break
+            again = generate()
+            if (alike := score(again)) > best:
+                samples, best = again, alike
+        acceptable = lambda s: score(s) >= min(best, enough)
 
     # About one line in six stops while its last sound is still going (the model ends a frame too
     # soon), which sounds clipped; some statements end rising like a question, and many yes/no
@@ -781,6 +799,19 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
 
 STYLE_RETRIES = 2
 CUT_RETRIES = 2
+# Lines this short are checked for being read in the speaker's voice (see _speak_line). By the
+# fingerprint, Leto's good takes of a two-word line scored 0.97-0.98, those that weren't him 0.90-0.96
+# (one word is too little to tell by: right or not, it scores 0.95-0.97, so the pitch tells); and a
+# take more than 1.2 times higher than the voice (1.35 for a question, which rises) isn't them.
+SHORT_WORDS = 3
+SHORT_RETRIES = 3
+MIN_SHORT_LIKENESS, MIN_ONE_WORD_LIKENESS = 0.97, 0.95
+MAX_SHORT_RISE, MAX_SHORT_RISE_QUESTION = 1.2, 1.35
+SHORT_VERSION = 1  # in the name of the audio of short lines: bump to make only those again
+
+
+def short_line(text: str) -> bool:
+    return len(text.split()) <= SHORT_WORDS
 # Speech ending louder than this (against the loudest 20 ms) stopped mid-sound: in the voices' own
 # recordings 4% of endings are this loud, in lines made with the old check (which looked at the
 # clip's silent end) 18%.

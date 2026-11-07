@@ -82,7 +82,14 @@ def _resolve(text: str, voice: str, style: str) -> tuple[str, str, str]:
 def _key(text: str, voice: str, rate: int, pitch_shift: int, style: str, take: int) -> str:
     return hashlib.sha1((f"{AUDIO_VERSION}|{voice}|{rate}|{pitch_shift}|{text}{'|' + designed.style_tag(style) if style else ''}"
                          f"{f'|take{take}' if take else ''}{f'|pauses{designed.PAUSES_VERSION}' if designed.SPACED_DOTS in text else ''}"
-                         f"{f'|tune{designed.TUNE_VERSION}' if designed.engine_of(voice) and designed.intonation(text) == 'question' else ''}").encode()).hexdigest()
+                         f"{f'|tune{designed.TUNE_VERSION}' if designed.engine_of(voice) and designed.intonation(text) == 'question' else ''}"
+                         f"{f'|short{designed.SHORT_VERSION}' if _checks_voice(voice, style) and designed.short_line(text) else ''}").encode()).hexdigest()
+
+
+def _checks_voice(voice: str, style: str) -> bool:
+    """Whether a short line in this voice is checked for sounding like them (designed.SHORT_WORDS)."""
+    engine = designed.engine_of(voice)
+    return bool(engine and engine.fingerprint and style not in engine.styles)
 
 
 def can_vary(voice: str) -> bool:

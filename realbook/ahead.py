@@ -164,19 +164,30 @@ def _groups(book: dict, todo: list[dict]) -> list[list[dict]]:
     return sorted(groups, key=lambda g: min((l["chapter"], l["segment"]) for l in g))
 
 
-def _make(book: dict, group: list[dict]) -> None:
+def _make(book: dict, group: list[dict]) -> list[dict]:
+    """Makes the lines; returns those that couldn't be made, after trying the rest."""
     pairs = [(book["chapters"][l["chapter"]]["segments"], book["chapters"][l["chapter"]]["segments"][l["segment"]]) for l in group]
     if len(pairs) > 1 and not designed.listening():
         try:
-            return lines.make_many(book, pairs)
+            lines.make_many(book, pairs)
+            return []
         except Exception:
             log.exception("Couldn't make lines together; making them one at a time")
-    for segs, seg in pairs:
-        lines.make(book, segs, seg, urgent=False)  # someone listening goes first
+    failed = []
+    for l, (segs, seg) in zip(group, pairs):
+        try:
+            lines.make(book, segs, seg, urgent=False)  # someone listening goes first
+        except Exception:
+            log.exception("Couldn't make a line for the iPhone")
+            failed.append(l)
+    return failed
 
 
 def _work() -> None:
     fails = 0
+    # Lines that wouldn't be made this time, left out from then on: one line in a group made the
+    # whole group fail again and again, and the lines after it were never made.
+    skipped: set[tuple[str, str]] = set()
     while True:
         book_id = _wanted
         try:
@@ -184,8 +195,8 @@ def _work() -> None:
         except KeyError:
             book = None
         wanted = [l for l in plan(book) if not l["behind"]] if book and enabled() else []
-        todo = [l for l in wanted if not l["ready"]]
-        _state.update(book=book_id, done=len(wanted) - len(todo), total=len(wanted))
+        todo = [l for l in wanted if not l["ready"] and (book_id, l["key"]) not in skipped]
+        _state.update(book=book_id, done=sum(l["ready"] for l in wanted), total=len(wanted))
         if not todo or fails >= 3:
             with _lock:
                 if book_id == _wanted:  # nobody asked for another book meanwhile
@@ -201,13 +212,10 @@ def _work() -> None:
         for group in _groups(book, todo[:WINDOW]):
             if _wanted != book_id or not enabled():
                 break
-            try:
-                system.keep_awake()
-                _make(book, group)
-                fails = 0
-                _state["done"] += len(group)
-            except Exception:
-                log.exception("Couldn't make a line for the iPhone")
-                fails += 1
-                if fails >= 3:
-                    break
+            system.keep_awake()
+            failed = _make(book, group)
+            skipped.update((book_id, l["key"]) for l in failed)
+            fails = fails + 1 if len(failed) == len(group) else 0
+            _state["done"] += len(group) - len(failed)
+            if fails >= 3:
+                break

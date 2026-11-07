@@ -431,10 +431,16 @@ def _unload_idle() -> None:
         mx.clear_cache()
 
 
+class NoAudio(RuntimeError):
+    """The model said nothing at all, as it does for a line of a lone letter ("H")."""
+
+
 def _generate(gen) -> np.ndarray:
     import mlx.core as mx
 
     parts = [r.audio for r in gen]
+    if not parts:
+        raise NoAudio("The voice made no sound for this line")
     audio = mx.concatenate(parts) if len(parts) > 1 else parts[0]
     mx.eval(audio)
     return np.clip(np.array(audio, dtype=np.float32).ravel(), -1, 1)
@@ -704,6 +710,16 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
     usual_text = info.get("reference_text", CALM_REFERENCE_TEXT)
 
     def generate() -> np.ndarray:
+        for _ in range(2):
+            try:
+                return read()
+            except NoAudio:
+                pass
+        # It's a pause rather than an error: a line that can't be made would hold up every line
+        # made with it, and the iPhone's saved hours stop at the first line missing.
+        return np.zeros(int(0.3 * SAMPLE_RATE), np.float32)
+
+    def read() -> np.ndarray:
         if not styled:
             return _generate(engine.read(model, text, ref, ref_text))
         import mlx.core as mx
@@ -751,7 +767,7 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
         ran_on = _dots_gaps(s, text)[1] if SPACED_DOTS in text else 0  # ran straight through the dots
         return int(clipped) + 2 * int(off > 0) + ran_on, off, _ending(s)
 
-    for _ in range(TUNE_RETRIES if tune == "question" else CUT_RETRIES):
+    for _ in range(0 if not samples.any() else TUNE_RETRIES if tune == "question" else CUT_RETRIES):  # a pause has no ending to fix
         if not faults(samples)[0]:
             break
         again = generate()

@@ -48,13 +48,15 @@ uv run realbook-web   # the same UI in your browser at http://127.0.0.1:8765
 - **Reader:** **Aa** sets the theme (Original, Paper, Sepia, Gray, Night), font, text size, justification, and whether dialogue is coloured by character. The list button shows the table of contents; the people button shows the cast.
 - **Menu bar (Mac):** RealBook → Settings… (⌘,) and Find Voice Models…, File → Add Book… (⌘O) and Library (⌘L), Playback → Next/Previous Chapter (⌘→/⌘←), Book → Show Contents (⌘1) / Show Cast (⌘2) / Export Audiobook…. On Windows, Settings and Find Voice Models are in the File menu.
 
-## On your phone, tablet or another computer
+## On your iPhone, phone or another computer
 
-**Listen over Wi‑Fi.** In Settings, turn on **Listen on Other Devices** and scan the QR code with your phone. The whole library opens in the phone's browser, laid out for a small screen, and the computer makes the voices, so designed voices work too. On iPhone, Share → Add to Home Screen gives it an app icon. Devices need the secret key in the link (a cookie remembers it); they can read, listen and edit the cast, but can't change settings or open anything on the computer. **New Link** cuts off every device paired so far. The computer stays awake while something is playing, but it has to be on and on the same network.
+**The iPhone app** (with the Mac app). In RealBook on the Mac, open **Listen on iPhone** and scan the code from the iPhone app. It reads like the Mac and keeps your place in step with it; the Mac makes the voices, so designed voices work too. Whenever it can reach the Mac over Wi‑Fi, the iPhone saves the next 4 hours of the book you're listening to, so you can leave without planning ahead, and **Listen on iPhone** can also make a whole book into an offline copy for it.
+
+The iPhone app isn't on the App Store yet. To install it (iOS 17 or later): open `ios/RealBook.xcodeproj` in Xcode, add your Apple ID in Xcode → Settings → Accounts, connect your iPhone, pick it as the destination and press ▶. The first time, turn on Settings → Privacy & Security → Developer Mode on the iPhone, and trust your Apple ID under Settings → General → VPN & Device Management. With a free Apple ID, Xcode has to install it again every 7 days.
+
+**In a browser.** Any other phone, tablet or computer on the same Wi‑Fi can listen in its browser: scan the Mac's code with the camera, or on Windows and Linux turn on **Listen on Other Devices** in Settings and scan its QR code. The whole library opens, laid out for a small screen, and the computer makes the voices. Devices need the secret key in the link (a cookie remembers it); they can read, listen and change voices, but not change settings or open things on the computer. **New Code** (Mac) or **New Link** (Windows, Linux) cuts off every device paired so far, the iPhone too. The computer stays awake while something is playing, but it has to be on and on the same network.
 
 **Take a book with you.** A book's ••• menu → **Export Audiobook…** (Mac) renders the whole book in the cast's voices into an `.m4b` audiobook with chapters, title, author and cover. It plays offline in Apple Books, BookPlayer, Smart AudioBook Player, VLC and other audiobook apps. Lines you've already listened to are reused; a long novel can take a few hours to make.
-
-**Why not a phone app?** Kokoro is small enough to run on a phone, but the designed voices' models (2.5–4.5 GB, and slower than real time on phone hardware) are not practical there, so the computer does the work.
 
 ## Fixing things
 

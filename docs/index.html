@@ -83,7 +83,7 @@
         <a class="btn secondary" href="https://github.com/stanislav16/realbook/releases/latest/download/RealBook-linux.tar.gz">Download for Linux<small>64-bit, Ubuntu 22.04 or newer</small></a>
       </div>
       <p class="note">Open source (GPL-3.0). No account, no subscription. Works with DRM-free EPUB and text files.</p>
-      <div class="shot"><img src="images/reader.png" alt="RealBook reading a book, with each character's lines in their own colour and the cast of voices beside it"></div>
+      <div class="shot"><img src="images/reader.png" alt="RealBook on a Mac reading a book aloud, with each character's lines in their own colour and the line being read highlighted"></div>
     </div>
 
     <section id="voices">
@@ -93,17 +93,18 @@
         <div class="card"><h3>Voices designed from the book</h3><p>With designed voices (Qwen3-TTS), each character's voice is made from a written description: “An old man in his seventies with a deep, low voice and a Scottish accent.” Rewrite any description and hear the change.</p></div>
         <div class="card"><h3>Natural voices, offline</h3><p>Kokoro's natural-sounding voices run on your own computer, about four times faster than real time. Nothing is uploaded.</p></div>
         <div class="card"><h3>Knows who's talking</h3><p>A built-in analyzer attributes dialogue to characters for free. Optionally, Claude can read the book for even more accurate casting.</p></div>
-        <div class="card"><h3>A reader you'll enjoy</h3><p>Themes, fonts and sizes like Apple Books, a table of contents that follows the book's own, and each speaker's lines in their colour.</p></div>
+        <div class="card"><h3>A reader you'll enjoy</h3><p>A native Mac app with themes, fonts and sizes like Apple Books, a table of contents that follows the book's own, and each speaker's lines in their colour.</p></div>
       </div>
     </section>
 
     <section id="devices">
       <div class="split flip">
-        <div class="phone"><img src="images/phone.png" alt="RealBook on a phone screen"></div>
+        <div class="phone"><img src="images/phone.png" alt="The RealBook iPhone app reading the same book, with the player at the bottom"></div>
         <div>
-          <h2>On your phone too</h2>
-          <p class="lead">Turn on <b>Listen on Other Devices</b> and scan the QR code: your phone, tablet or another computer on the same Wi‑Fi gets your whole library, with your place kept in sync. The voices are made on your Mac, so even the large models work.</p>
-          <p class="lead">Going out? <b>Export Audiobook</b> turns a book into an .m4b with chapters, cover and every character's voice, ready for Apple Books, BookPlayer, Smart AudioBook Player or VLC, offline.</p>
+          <h2>On your iPhone too</h2>
+          <p class="lead">The RealBook iPhone app pairs with your Mac: open <b>Listen on iPhone</b> and scan the code. It reads like the Mac, keeps your place in step with it, and the voices are made on your Mac, so even the large models work.</p>
+          <p class="lead">Going out? Whenever it can reach your Mac, your iPhone saves the next 4 hours of the book you're listening to. Or keep a whole book on it as an offline copy, or export an .m4b audiobook for any audiobook app.</p>
+          <p class="note">The iPhone app isn't on the App Store yet: you can install it from the source with Xcode and a free Apple ID (<a href="https://github.com/stanislav16/realbook#on-your-iphone-phone-or-another-computer">how</a>). Android phones, tablets and other computers listen in their browser: scan the same code with the camera. On Windows and Linux, turn on <b>Listen on Other Devices</b> in Settings.</p>
         </div>
       </div>
     </section>
@@ -122,9 +123,9 @@
       <h2>Download and install</h2>
       <table>
         <tr><th>Computer</th><th>What you get</th><th>First launch</th></tr>
-        <tr><td>Mac with Apple silicon, macOS 14+</td><td>Mac voices, Kokoro, listening on your phone and audiobook export. Designed voices (Qwen3-TTS) need macOS 26 or later.</td><td>Open <code>RealBook.dmg</code> and drag RealBook to Applications. The app isn't notarized yet: the first time, macOS will refuse to open it; go to System Settings → Privacy &amp; Security and click <b>Open Anyway</b>.</td></tr>
-        <tr><td>Windows 10 or 11</td><td>Windows voices, Kokoro, listening on your phone. Designed voices and audiobook export are Mac-only for now.</td><td>Unzip <code>RealBook-windows.zip</code> and run <code>RealBook.exe</code>. SmartScreen may warn about an unknown publisher: click <b>More info → Run anyway</b>.</td></tr>
-        <tr><td>Linux, 64-bit (Ubuntu 22.04, Debian 12, Fedora 36 or newer)</td><td>Kokoro, and espeak-ng voices if it's installed; listening on your phone. Designed voices and audiobook export are Mac-only for now.</td><td>Unpack <code>RealBook-linux.tar.gz</code> and run <code>RealBook/RealBook</code>. Download the Kokoro voices when it offers them: that's what reads your books.</td></tr>
+        <tr><td>Mac with Apple silicon, macOS 14+</td><td>Mac voices, Kokoro, the iPhone app and audiobook export. Designed voices (Qwen3-TTS) need macOS 26 or later.</td><td>Open <code>RealBook.dmg</code> and drag RealBook to Applications. The app isn't notarized yet: the first time, macOS will refuse to open it; go to System Settings → Privacy &amp; Security and click <b>Open Anyway</b>.</td></tr>
+        <tr><td>Windows 10 or 11</td><td>Windows voices, Kokoro, listening in your phone's browser. Designed voices and audiobook export are Mac-only for now.</td><td>Unzip <code>RealBook-windows.zip</code> and run <code>RealBook.exe</code>. SmartScreen may warn about an unknown publisher: click <b>More info → Run anyway</b>.</td></tr>
+        <tr><td>Linux, 64-bit (Ubuntu 22.04, Debian 12, Fedora 36 or newer)</td><td>Kokoro, and espeak-ng voices if it's installed; listening in your phone's browser. Designed voices and audiobook export are Mac-only for now.</td><td>Unpack <code>RealBook-linux.tar.gz</code> and run <code>RealBook/RealBook</code>. Download the Kokoro voices when it offers them: that's what reads your books.</td></tr>
       </table>
       <p class="note">Voice models are downloaded from inside the app the first time you choose them: Kokoro is 354 MB, designed voices 6.3 GB.</p>
     </section>

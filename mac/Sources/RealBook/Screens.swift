@@ -259,6 +259,9 @@ struct SettingsScreen: View {
         .formStyle(.grouped)
         .frame(width: 560, height: 520)
         .sheet(isPresented: $finder) { ModelFinder().environment(model) }
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: .init("debugFinder"))) { _ in finder = true }
+        #endif
         .task {
             while !Task.isCancelled {
                 await model.refreshConfig()

@@ -39,8 +39,14 @@ enum DebugScript {
                 guard wh.count == 2, let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { continue }
                 window.setContentSize(NSSize(width: wh[0], height: wh[1]))
                 window.center()
-            case "shot":  // the window as it is on screen, glass included (snap can't draw the glass)
-                guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { continue }
+            case "settings":  // as the app menu's Settings… does
+                guard let menu = NSApp.mainMenu?.items.first?.submenu,
+                      let index = menu.items.firstIndex(where: { $0.title.hasPrefix("Settings") }) else { print("[settings] no menu item"); continue }
+                menu.performActionForItem(at: index)
+            case "finder": NotificationCenter.default.post(name: .init("debugFinder"), object: nil)
+            case "shot":  // the front window as it is on screen, glass included (snap can't draw the glass)
+                guard let front = NSApp.orderedWindows.first(where: { $0.isVisible && $0.contentView != nil }) else { continue }
+                let window = front.attachedSheet ?? front
                 // An app may capture its own windows; the function is hidden from Swift since macOS 15.
                 typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
                 guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImage"),
@@ -53,7 +59,7 @@ enum DebugScript {
                 if let e { NSApp.postEvent(e, atStart: false) }
             case "responder": print("[responder]", NSApp.keyWindow.map { String(describing: type(of: $0.firstResponder as Any)) } ?? "no key window")
             case "activate": NSApp.activate(ignoringOtherApps: true)
-            case "quit": NSApp.terminate(nil)
+            case "quit": exit(0)  // at once, even with a sheet open
             default: print("[script] unknown", raw)
             }
             fflush(stdout)

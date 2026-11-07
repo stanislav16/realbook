@@ -192,7 +192,9 @@ struct ChapterPage: NSViewRepresentable {
             let top = clip.bounds.origin.y, visible = clip.bounds.height - parent.bottomInset
             guard force || line.minY < top + 30 || line.maxY > top + visible - 30 else { return }
             let most = max(0, text.frame.height - clip.bounds.height)
-            let y = min(max(0, line.minY - max(40, (visible - line.height) * 0.3)), most)
+            // Near the start of a chapter it stays at the top, so the chapter's title stays in view.
+            let fitsAtTop = line.maxY < visible - 30
+            let y = fitsAtTop ? 0 : min(max(0, line.minY - max(40, (visible - line.height) * 0.3)), most)
             if animated {
                 NSAnimationContext.runAnimationGroup { ctx in
                     ctx.duration = 0.3
@@ -273,6 +275,12 @@ final class PageTextView: NSTextView {
         textContainerInset = NSSize(width: side, height: 24)
         guard let tc = textContainer else { return }
         tc.containerSize = NSSize(width: bounds.width - 2 * side, height: .greatestFiniteMagnitude)
+    }
+
+    /// Always at the top of its scroll view. Resizing would otherwise move it up when the scroll view
+    /// gets shorter (as when the toolbar appears), hiding the chapter's title and first lines for good.
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(.zero)
     }
 
     override func setFrameSize(_ newSize: NSSize) {

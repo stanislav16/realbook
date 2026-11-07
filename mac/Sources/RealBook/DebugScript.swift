@@ -34,6 +34,20 @@ enum DebugScript {
                 view.cacheDisplay(in: view.bounds, to: rep)
                 try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: arg))
                 print("[snap]", arg, window.frame.size)
+            case "size":  // "size 1200x760": the window's size in points, for screenshots
+                let wh = arg.split(separator: "x").compactMap { Double($0) }
+                guard wh.count == 2, let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { continue }
+                window.setContentSize(NSSize(width: wh[0], height: wh[1]))
+                window.center()
+            case "shot":  // the window as it is on screen, glass included (snap can't draw the glass)
+                guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { continue }
+                // An app may capture its own windows; the function is hidden from Swift since macOS 15.
+                typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+                guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImage"),
+                      let image = unsafeBitCast(symbol, to: Capture.self)(.null, 1 << 3, UInt32(window.windowNumber), 1 | 1 << 3)?.takeRetainedValue()
+                else { print("[shot] failed"); continue }
+                try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: arg))
+                print("[shot]", arg, image.width, image.height)
             case "space":
                 let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: NSApp.keyWindow?.windowNumber ?? 0, context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)
                 if let e { NSApp.postEvent(e, atStart: false) }

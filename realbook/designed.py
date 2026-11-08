@@ -245,6 +245,70 @@ def _fetch(status: dict, url: str, target: Path, size: int, sha: str, done_bytes
     part.rename(target)
 
 
+# ------------------------------------------------------------------ listener
+#
+# Now and then the voice model adds sound that isn't speech before or after a line's words: a thump
+# and a click before "the Duke said,", a few babbled syllables a second after "Paul asked." A small
+# speech recogniser hears where the words begin and end, and a take with sound beyond them is made
+# again. It's downloaded on its own the first time designed voices read a line; until it's there,
+# lines aren't checked.
+
+LISTENER = ("mlx-community/parakeet-tdt_ctc-110m", "d62547387c356a1ab6bb3d85d98b2103f655282e", {
+    "config.json": (55801, "3e9a616ccc63fda490ca28b62ba5f480502a72a7812f0a46208f3c58785d3e27"),
+    "model.safetensors": (458634828, "a2e0e3cdbc2e64ff166ef4be21566810a83dd7138903e0724c8c05e0dd4c26ee"),
+    "tokenizer.model": (251875, "4b97fbc15390829e3b94069fdeccf0d053561d090e12d94789e4e71c531f93fc"),
+    "vocab.txt": (5160, "8c8f4d30b7f38860667339d4a30191ea5dad8a93a8576cb03013e42a4f658118"),
+})
+LISTENER_RATE = 16000
+_listener_install = {"state": "idle", "progress": 0.0, "message": "", "tried": float("-inf")}
+
+
+def _listener_dir() -> Path:
+    return store.DATA_DIR / "models" / "listener"
+
+
+def _listener_installed() -> bool:
+    return all((_listener_dir() / name).exists() for name in LISTENER[2])
+
+
+def _download_listener() -> None:
+    repo, rev, files = LISTENER
+    status, total, done = _listener_install, sum(size for size, _ in files.values()), 0
+    try:
+        for name, (size, sha) in files.items():
+            target = _listener_dir() / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                source = _hf_cache_copy(repo, rev, name, size, sha)
+                if source:
+                    shutil.copy(source, target)
+                else:
+                    _fetch(status, f"{HF}/{repo}/resolve/{rev}/{name}", target, size, sha, done, total)
+            done += size
+        status.update(state="done", progress=1.0, message="")
+    except Exception as e:  # tried again later
+        status.update(state="error", message=str(e))
+
+
+def _listener(engine: Engine):
+    """The speech recogniser, loaded; None while it's being downloaded (or after a failed try, for an hour)."""
+    if not _listener_installed():
+        with _install_lock:
+            if _listener_install["state"] != "downloading" and time.monotonic() - _listener_install["tried"] > 3600:
+                _listener_install.update(state="downloading", tried=time.monotonic())
+                threading.Thread(target=_download_listener, daemon=True).start()
+        return None
+    if (engine.name, "listener") not in _models:
+        try:
+            from mlx_audio.stt.utils import load_model
+
+            _models[engine.name, "listener"] = load_model(_listener_dir(), model_type="parakeet")
+        except Exception as e:  # lines are made unchecked rather than not at all
+            print(f"[designed] the listener didn't load: {e}", flush=True)
+            _models[engine.name, "listener"] = None
+    return _models[engine.name, "listener"]
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -779,16 +843,23 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
     # takes that are still the same person).
     tune = intonation(text)
 
-    def faults(s: np.ndarray) -> tuple[int, float, float]:  # the wrong tune is worse than a clipped end
-        clipped, rise = _ending(s) > CUT_DB, _end_rise(s) if tune else 1.0
-        off = max(0.0, rise - MAX_STATEMENT_RISE) if tune == "statement" else max(0.0, MIN_QUESTION_RISE - rise)
-        ran_on = _dots_gaps(s, text)[1] if SPACED_DOTS in text else 0  # ran straight through the dots
-        return int(clipped) + 2 * int(off > 0) + ran_on, off, _ending(s)
+    found: dict[int, tuple] = {}  # by take, as listening to one takes a moment
 
+    def faults(s: np.ndarray) -> tuple[int, float, float, float]:
+        # Sound that isn't speech is worst, then the wrong tune, then a clipped end.
+        if id(s) not in found:
+            clipped, rise = _ending(s) > CUT_DB, _end_rise(s) if tune else 1.0
+            off = max(0.0, rise - MAX_STATEMENT_RISE) if tune == "statement" else max(0.0, MIN_QUESTION_RISE - rise)
+            ran_on = _dots_gaps(s, text)[1] if SPACED_DOTS in text else 0  # ran straight through the dots
+            noise = _stray(engine, s, text)
+            found[id(s)] = (4 * int(noise > 0) + int(clipped) + 2 * int(off > 0) + ran_on, noise, off, _ending(s))
+        return found[id(s)]
+
+    takes = [samples]  # kept, so a take's id isn't reused while its faults are remembered
     for _ in range(0 if not samples.any() else TUNE_RETRIES if tune == "question" else CUT_RETRIES):  # a pause has no ending to fix
         if not faults(samples)[0]:
             break
-        again = generate()
+        takes.append(again := generate())
         if faults(again) < faults(samples) and acceptable(again):
             samples = again
     with tempfile.NamedTemporaryFile(suffix=".wav", dir=out.parent, delete=False) as tmp:
@@ -807,6 +878,11 @@ SHORT_WORDS = 3
 SHORT_RETRIES = 3
 MIN_SHORT_LIKENESS, MIN_ONE_WORD_LIKENESS = 0.97, 0.95
 MAX_SHORT_RISE, MAX_SHORT_RISE_QUESTION = 1.2, 1.35
+# Sound this far before the first word the listener hears, or after the last, isn't speech (see
+# _stray). In 5,800 lines of Dune, 99% had less than 0.22 s before and 0.25 s after; past these limits
+# were 1% of lines, nearly all with a thump, tick, hiss or stray syllable at the start or end.
+STRAY_BEFORE, STRAY_AFTER = 0.25, 0.35
+SOUND_DB = -30  # quieter than this against the loudest 10 ms is silence (breath is quieter still)
 SHORT_VERSION = 1  # in the name of the audio of short lines: bump to make only those again
 
 
@@ -831,6 +907,39 @@ FADE_IN_MS, FADE_OUT_MS, TAIL_MS = 5, 40, 40
 WH_QUESTION = re.compile(r"^\W*(?:(?:and|but|so|well|then|oh|now|or)\W+)*"
                          r"(?:who|whom|whose|what|whatever|where|when|why|how|which)\b", re.IGNORECASE)
 CLOSERS = "\"”’')]"
+
+
+def _sound_span(samples: np.ndarray) -> tuple[float, float]:
+    """Where the clip's sound begins and ends, in seconds (anything above SOUND_DB of its loudest 10 ms)."""
+    frame = SAMPLE_RATE // 100
+    n = len(samples) // frame
+    rms = np.sqrt(np.mean(samples[:n * frame].reshape(n, frame) ** 2, axis=1)) + 1e-9
+    on = np.where(20 * np.log10(rms / rms.max()) > SOUND_DB)[0]
+    return (on[0] / 100, (on[-1] + 1) / 100) if len(on) else (0.0, 0.0)
+
+
+def _stray(engine: Engine, samples: np.ndarray, text: str) -> float:
+    """Seconds of sound before the first word the listener hears, or after the last (see LISTENER);
+    0 when there's nothing to go by: no listener yet, or it heard fewer words than `text` has."""
+    model = _listener(engine) if samples.any() else None
+    if model is None:
+        return 0.0
+    import mlx.core as mx
+
+    n = int(len(samples) * LISTENER_RATE / SAMPLE_RATE)
+    heard = np.interp(np.arange(n) * SAMPLE_RATE / LISTENER_RATE, np.arange(len(samples)), samples).astype(np.float32)
+    try:
+        result = model.generate(mx.array(heard))
+    except Exception as e:  # a line is better unchecked than not made
+        print(f"[designed] the listener failed: {e!r}", flush=True)
+        return 0.0
+    if len(result.text.split()) < len(re.findall(r"[\w’']+", text)):
+        return 0.0  # it missed a word ("Busy!"), which may be the sound it didn't place
+    words = [t for sentence in result.sentences for t in sentence.tokens if t.text.strip()]
+    if not words:
+        return 0.0
+    start, end = _sound_span(samples)
+    return max(0.0, words[0].start - start - STRAY_BEFORE) + max(0.0, end - words[-1].end - STRAY_AFTER)
 
 
 def intonation(text: str) -> str:

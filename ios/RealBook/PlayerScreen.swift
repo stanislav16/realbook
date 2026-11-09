@@ -409,6 +409,10 @@ struct PlayerScreen: View {
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(showText ? Color(look.current.background) : .black)
                             .offset(x: player.playing ? 0 : 1.5)
+                            // Play and pause swap at once: animated with the button letting go, the
+                            // new icon faded and slid in, which felt slow to answer.
+                            .contentTransition(.identity)
+                            .transaction { $0.animation = nil }
                     }
                 }
             }

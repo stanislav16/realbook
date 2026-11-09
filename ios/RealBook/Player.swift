@@ -749,7 +749,7 @@ final class Player {
                                       sample: b.narrator?.voice.map { VoiceSample(voice: $0, rate: b.narrator?.rate ?? 180, pitchShift: b.narrator?.pitch_shift ?? 0) })
             return [narrator] + b.cast.sorted { ($0.lines ?? 0) > ($1.lines ?? 0) }.map { m in
                 CastMember(id: m.id, name: m.name, color: colors[m.id], summary: m.summary, lines: m.lines, voice: m.designed_from,
-                           voiceFrom: m.voice_from?.title, sample: m.voice.map { VoiceSample(voice: $0, rate: m.rate ?? 180, pitchShift: m.pitch_shift ?? 0) })
+                           voiceFrom: m.voice_from?.title, later: (m.later ?? []).map(\.label), sample: m.voice.map { VoiceSample(voice: $0, rate: m.rate ?? 180, pitchShift: m.pitch_shift ?? 0) })
             }
         }
         guard let t = timeline else { return [] }

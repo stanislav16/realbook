@@ -18,7 +18,8 @@ _joining = threading.Lock()
 
 
 def _spec(book: dict, segments: list[dict], seg: dict, styles: dict | None) -> tuple:
-    v = store.voice_for(book, seg)
+    chapter = next((i for i, ch in enumerate(book["chapters"]) if ch["segments"] is segments), None)
+    v = store.voice_for(book, seg, chapter)
     if styles is None:
         styles = heuristic.line_styles(segments)
     style = styles.get(seg["q"], "") if seg["kind"] == "dialogue" and seg.get("speaker") else ""

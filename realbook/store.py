@@ -436,10 +436,13 @@ def spoken(book: dict, text: str) -> str:
     return rx.sub(lambda m: lower[key(m.group(1))] + m.group(2), text)
 
 
-def voice_for(book: dict, seg: dict) -> dict:
+def voice_for(book: dict, seg: dict, chapter: int | None = None) -> dict:
+    """The voice a line is read in; in `chapter`, a character's later voice once they're older there."""
     if seg["kind"] == "dialogue" and seg.get("speaker"):
         for c in book["characters"]:
             if c["id"] == seg["speaker"]:
+                if chapter is not None:
+                    c = next((s for s in reversed(c.get("later", [])) if s["from"] <= chapter and s.get("voice")), c)
                 return {"voice": c["voice"], "rate": c["rate"], "pitch_shift": c.get("pitch_shift", 0)}
     n = book["narrator"]
     return {"voice": n["voice"], "rate": n.get("rate", voices.DEFAULT_RATE), "pitch_shift": n.get("pitch_shift", 0)}

@@ -180,7 +180,40 @@ def _same_here(person: dict) -> dict:
     return {"voice": same["voice"], "rate": same.get("rate", DEFAULT_RATE), "pitch_shift": same.get("pitch_shift", 0)}
 
 
+# A later voice (someone older after a time jump) is cast as a person of its own: who they are, at
+# their new age, with what was set for that voice by hand.
+LATER_OWN = ("voice", "rate", "pitch_shift", "designed_from", "voice_description", "voice_take", "locked")
+
+
+def later_person(char: dict, stage: dict) -> dict:
+    """The character as they are from `stage` on (see LATER_OWN)."""
+    base = {k: v for k, v in char.items() if k not in LATER_OWN + ("later", "voice_same", "voice_from", "carry_checked")}
+    return {**base, **{k: stage[k] for k in LATER_OWN if k in stage}, "id": stage["id"], "age": stage["age"],
+            "years": stage.get("years"), "later_of": char["id"]}
+
+
+def latest(char: dict) -> dict:
+    """The character as they are at the end of the book: the voice another book carries on with."""
+    return later_person(char, char["later"][-1]) if char.get("later") else char
+
+
 def cast(characters: list[dict], narrator: dict | None = None) -> tuple[dict, list[dict]]:
+    """Give everyone a voice (see _cast), and characters their later voices too."""
+    stages = [later_person(c, st) for c in characters for st in c.get("later", [])]
+    narrator, out = _cast(characters + stages, narrator)
+    voiced = {p["id"]: p for p in out if p.get("later_of")}
+    result = []
+    for c in out:
+        if c.get("later_of"):
+            continue
+        if c.get("later"):
+            c = {**c, "later": [{**st, **{k: voiced[st["id"]][k] for k in ("voice", "rate", "pitch_shift", "designed_from")
+                                           if k in voiced.get(st["id"], {})}} for st in c["later"]]}
+        result.append(c)
+    return narrator, result
+
+
+def _cast(characters: list[dict], narrator: dict | None = None) -> tuple[dict, list[dict]]:
     """Assign {"voice", "rate", "pitch"} to the narrator and every character.
 
     Characters are cast in order of how much they speak, so main characters get the best
@@ -314,7 +347,10 @@ def _source(book_id: str, who: str) -> dict | None:
         other = store.load(book_id)
     except KeyError:
         return None
-    return other.get("narrator") if who == "narrator" else next((c for c in other["characters"] if c["id"] == who), None)
+    if who == "narrator":
+        return other.get("narrator")
+    char = next((c for c in other["characters"] if c["id"] == who), None)
+    return latest(char) if char else None
 
 
 def _voice_of(person: dict, narrator: bool, depth: int = 0) -> dict:
@@ -402,7 +438,8 @@ def carry_over(book: dict) -> None:
         if not _fits(person, same, narrator) or _from(same, book["id"], other, source):
             return False
         person["voice_same"] = same
-        person["voice_from"] = {"book": other["id"], "title": other["title"], "character": "narrator" if narrator else source["id"]}
+        person["voice_from"] = {"book": other["id"], "title": other["title"],
+                                "character": "narrator" if narrator else source.get("later_of", source["id"])}
         return True
 
     for c in sorted(todo, key=lambda c: -c.get("lines", 0)):
@@ -410,9 +447,9 @@ def carry_over(book: dict) -> None:
         if c["id"] in own or c.get("voice_description") or c.get("locked"):
             continue
         for other in others:
-            match = max(((_same_person(c, o), o.get("lines", 0), o) for o in other.get("characters", [])
+            match = max(((_same_person(c, latest(o)), o.get("lines", 0), o) for o in other.get("characters", [])
                          if f"{other['id']}/{o['id']}" not in taken), key=lambda m: m[:2], default=(0, 0, None))
-            if match[0] and give(c, other, match[2], narrator=False):
+            if match[0] and give(c, other, latest(match[2]), narrator=False):
                 taken.add(f"{other['id']}/{match[2]['id']}")
                 break
     if narrator.get("carry_checked") != told and not narrator.get("voice_from"):

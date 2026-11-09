@@ -1050,6 +1050,14 @@ function renderCast() {
         Object.assign(c, await api(`/api/books/${b.id}/characters/${c.id}`, { method: "PUT", json: s }));
       }, sampleLine(c.id)),
       c.locked ? el("div", { class: "lock" }, "Voice kept by you: updates and re-casts won't change it.") : null,
+      ...(c.later || []).map((st) => el("div", { class: "later" },
+        el("div", { class: "later-top" },
+          el("span", {}, `From ${st.chapter || `chapter ${st.from + 1}`}`),
+          el("span", { class: "muted" }, ageText(st)),
+          el("button", { class: "more-btn", title: `Remove this older voice: ${c.name} keeps one voice all through`, onclick: () => removeLaterVoice(c, st) }, "✕")),
+        ...voiceControls(st, st.id, async (s) => {
+          Object.assign(st, await api(`/api/books/${b.id}/characters/${st.id}`, { method: "PUT", json: s }));
+        }, sampleLine(c.id)))),
     );
   });
   $("#cast-list").replaceChildren(...(q && !"narrator".includes(q) ? [] : [narrator]), ...cards,
@@ -1155,7 +1163,7 @@ async function importReview() {
     b.ai_done = { ...(b.ai_done || {}), review: Date.now() / 1000 };
     S.chapter = await api(`/api/books/${b.id}/chapters/${S.chapterIdx}`);
     voicesChanged(); renderCast(); renderPage(); highlight();
-    const bits = [r.speakers && `${r.speakers} speakers`, r.characters && `${r.characters} characters`, r.added && `${r.added} new`, r.merged && `${r.merged} merged`, r.said && `${r.said} pronunciations`, r.narrator && "the narrator"].filter(Boolean);
+    const bits = [r.speakers && `${r.speakers} speakers`, r.characters && `${r.characters} characters`, r.added && `${r.added} new`, r.merged && `${r.merged} merged`, r.said && `${r.said} pronunciations`, r.later && `${r.later} later voices`, r.narrator && "the narrator"].filter(Boolean);
     toast(`Review imported: ${bits.join(", ") || "nothing to change"}${r.skipped_count ? ` (${r.skipped_count} entries didn't match the book and were skipped)` : ""}`, 6000);
   } catch (e) { toast(e.message, 6000); }
 }
@@ -1164,11 +1172,47 @@ function characterMenu(anchor, c) {
   popupMenu(anchor, [
     { label: "Rename…", action: () => renameCharacter(c) },
     { label: "Merge into…", action: () => mergeCharacter(c) },
+    { label: "Add older voice…", action: () => addLaterVoice(c) },
     { label: "Pronunciation…", action: () => editPronunciations(c.name.split(/\s+/).find((w) => /^[A-Z]/.test(w) && !["The", "Lady", "Duke", "Baron", "Dr.", "Reverend", "Mother", "Princess", "Emperor"].includes(w)) || c.name.split(/\s+/)[0]) },
     "-",
     { label: "Remove", danger: true, action: () => removeCharacter(c) },
   ]);
 }
+
+// After a time jump: from a later chapter on, the character is older and has a voice for that age.
+async function addLaterVoice(c) {
+  const chapters = S.book.toc.map((t, i) => [String(i), [t.section, t.title].filter(Boolean).join(" · ")]).slice(1);
+  const next = { child: "young", young: "adult", adult: "old" }[c.age] || "old";
+  const v = await ask({
+    title: `Older voice for ${c.name}`, ok: "Add Voice",
+    text: `After a time jump, ${c.name} can sound older: from the chapter you choose, their lines are read in a voice for their new age. Earlier chapters keep the voice they have now.`,
+    fields: [
+      { name: "from", label: "From", value: String(Math.max(1, S.chapterIdx || 0)), options: chapters },
+      { name: "age", label: "Age", value: next, options: [["child", "Child (under 13)"], ["young", "Young (13 to 29)"], ["adult", "Adult (30 to 59)"], ["old", "Old (60 and over)"]] },
+      { name: "years", label: "Years (optional)", value: "" },
+    ],
+  });
+  if (!v) return;
+  const json = { from_chapter: Number(v.from), age: v.age };
+  if (/^\d+$/.test((v.years || "").trim())) json.years = Number(v.years.trim());
+  try {
+    const updated = await api(`/api/books/${S.book.id}/characters/${c.id}/later`, { method: "POST", json });
+    S.book.cast = S.book.cast.map((x) => (x.id === c.id ? updated : x));
+    voicesChanged();
+    renderCast();
+  } catch (e) { toast(e.message); }
+}
+
+async function removeLaterVoice(c, stage) {
+  try {
+    const updated = await api(`/api/books/${S.book.id}/characters/${c.id}/later/${stage.from}`, { method: "DELETE" });
+    S.book.cast = S.book.cast.map((x) => (x.id === c.id ? updated : x));
+    voicesChanged();
+    renderCast();
+  } catch (e) { toast(e.message); }
+}
+
+const ageText = (st) => (st.years ? `${st.years} years old` : { child: "a child", young: "a young adult", adult: "an adult", old: "old" }[st.age] || "");
 
 async function renameCharacter(c) {
   const others = [...new Set([...(c.other_names || []), ...(c.aliases || [])])].filter((n) => n !== c.name).slice(0, 6);

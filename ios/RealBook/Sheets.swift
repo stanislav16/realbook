@@ -130,6 +130,9 @@ struct CastRow: View {
                 if let from = member.voiceFrom {
                     Label("Same voice as in \(from)", systemImage: "books.vertical").font(.footnote).foregroundStyle(.secondary)
                 }
+                ForEach(member.later, id: \.self) { line in
+                    Label("Older voice \(line.prefix(1).lowercased() + line.dropFirst())", systemImage: "hourglass").font(.footnote).foregroundStyle(.secondary)
+                }
             }
             if member.sample != nil {
                 Button { player.sample(member) } label: {

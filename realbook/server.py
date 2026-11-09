@@ -274,7 +274,8 @@ def get_book(book_id: str):
     b = _book(book_id)
     if voices.designed_engine():
         talkers = sorted(b["characters"], key=lambda c: -c.get("lines", 0))[:12]
-        designed.design_ahead([b["narrator"]["voice"]] + [c["voice"] for c in talkers])
+        designed.design_ahead([b["narrator"]["voice"]] + [c["voice"] for c in talkers]
+                              + [st["voice"] for c in talkers for st in c.get("later", []) if st.get("voice")])
     return {
         **store.summary(b),
         "narrator": b["narrator"],
@@ -351,10 +352,66 @@ def set_narrator(book_id: str, v: VoiceSettings):
     return b["narrator"]
 
 
+def _later(b: dict, who: str) -> tuple[dict, dict] | None:
+    """For "paul@40" (Paul's voice from chapter 40 on): the character and that later voice."""
+    cid, _, start = who.partition("@")
+    char = next((c for c in b["characters"] if c["id"] == cid), None)
+    stage = next((st for st in (char or {}).get("later", []) if st["id"] == who), None)
+    return (char, stage) if stage else None
+
+
+class Later(BaseModel):
+    from_chapter: int
+    age: str
+    years: int | None = None
+
+
+@app.post("/api/books/{book_id}/characters/{char_id}/later")
+def add_later_voice(book_id: str, char_id: str, later: Later):
+    """From this chapter on, the character is older (after a time jump) and has a voice for that age."""
+    b = _book(book_id)
+    if not 0 < later.from_chapter < len(b["chapters"]) or later.age not in voices.AGES or not (later.years is None or 1 <= later.years <= 120):
+        raise HTTPException(400, "Choose a chapter after the first, an age group and an age from 1 to 120")
+    with store.lock(book_id):
+        char = next((c for c in b["characters"] if c["id"] == char_id), None)
+        if char is None:
+            raise HTTPException(404, "Character not found")
+        ch = b["chapters"][later.from_chapter]
+        stage = {"id": f"{char_id}@{later.from_chapter}", "name": char["name"], "from": later.from_chapter, "age": later.age,
+                 "chapter": " · ".join(x for x in (ch.get("section"), ch["title"]) if x)}
+        if later.years:
+            stage["years"] = later.years
+        char["later"] = sorted([st for st in char.get("later", []) if st["from"] != later.from_chapter] + [stage], key=lambda st: st["from"])
+        voices.cast_book(b)
+        store.save(b)
+        char = next(c for c in b["characters"] if c["id"] == char_id)
+    if voices.designed_engine():
+        designed.design_ahead([st["voice"] for st in char["later"] if st.get("voice")])
+    return char
+
+
+@app.delete("/api/books/{book_id}/characters/{char_id}/later/{from_chapter}")
+def remove_later_voice(book_id: str, char_id: str, from_chapter: int):
+    b = _book(book_id)
+    with store.lock(book_id):
+        char = next((c for c in b["characters"] if c["id"] == char_id), None)
+        if char is None:
+            raise HTTPException(404, "Character not found")
+        char["later"] = [st for st in char.get("later", []) if st["from"] != from_chapter]
+        if not char["later"]:
+            del char["later"]
+        store.save(b)
+    return char
+
+
 @app.put("/api/books/{book_id}/characters/{char_id}")
 def set_character_voice(book_id: str, char_id: str, v: VoiceSettings):
     b = _book(book_id)
     with store.lock(book_id):
+        if found := _later(b, char_id):  # a later voice
+            found[1].update(v.model_dump(), locked=True)
+            store.save(b)
+            return found[1]
         for c in b["characters"]:
             if c["id"] == char_id:
                 if v.voice != c.get("voice"):
@@ -403,6 +460,8 @@ def design_voice(book_id: str, who: str, d: Design):
     b = _book(book_id)
 
     def find():
+        if found := _later(b, who):
+            return found[1]
         return b["narrator"] if who == "narrator" else next((c for c in b["characters"] if c["id"] == who), None)
 
     with store.lock(book_id):
@@ -418,6 +477,8 @@ def design_voice(book_id: str, who: str, d: Design):
         if d.description is not None:
             text = d.description.strip()[:600]
             own = {k: v for k, v in person.items() if k != "voice_description"}
+            if found := _later(b, who):  # a later voice: who they are, at that age
+                own = {k: v for k, v in voices.later_person(*found).items() if k != "voice_description"}
             automatic = designed.narrator_description(person) if who == "narrator" else designed.describe_character(own)
             if text and text != automatic:
                 person["voice_description"] = text
@@ -551,7 +612,7 @@ def read_again(book_id: str, n: int, sid: int):
     if not 0 <= sid < len(ch["segments"]):
         raise HTTPException(404, "Segment not found")
     seg = ch["segments"][sid]
-    if not tts.can_vary(store.voice_for(b, seg)["voice"]):
+    if not tts.can_vary(store.voice_for(b, seg, n)["voice"]):
         raise HTTPException(400, "This voice reads a line the same way every time."
                             + (" Give the character a designed voice to hear it differently." if system.MAC else ""))
     with store.lock(book_id):

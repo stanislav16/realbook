@@ -231,6 +231,9 @@ body.native.mac .panel.left .panel-head { padding-top: 52px; }  /* under the win
 .slider input { width: 100%; accent-color: var(--accent); }
 .slider span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .lock { margin-top: 6px; color: var(--page-muted); font-size: 11px; }
+.later { margin-top: 10px; padding-left: 10px; border-left: 2px solid var(--line, rgba(127,127,127,.3)); }
+.later-top { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.later-top .muted { margin-left: auto; font-weight: 400; }
 .voice-from { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; color: var(--page-muted); font-size: 11px; }
 .design { display: grid; gap: 3px; margin-top: 8px; color: var(--page-muted); font-size: 11px; }
 .design-text { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 12px; line-height: 1.35; padding: 5px 7px;

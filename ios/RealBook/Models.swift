@@ -144,6 +144,20 @@ struct MacBook: Codable {
         var rate: Int?
         var pitch_shift: Int?
         var voice_from: VoiceFrom?
+        var later: [Later]?
+    }
+    /// A character's voice from a later chapter on, when a time jump has made them older.
+    struct Later: Codable {
+        var from: Int
+        var chapter: String?
+        var age: String?
+        var years: Int?
+        var designed_from: String?
+
+        var label: String {
+            let age = years.map { "\($0) years old" } ?? ["child": "a child", "young": "a young adult", "adult": "an adult", "old": "old"][age ?? ""] ?? ""
+            return "From \(chapter ?? "chapter \(from + 1)")" + (age.isEmpty ? "" : ": \(age)")
+        }
     }
     struct Narrator: Codable {
         var designed_from: String?
@@ -210,6 +224,7 @@ struct CastMember: Identifiable, Equatable {
     var lines: Int?
     var voice: String?  // how the voice was described when it was made
     var voiceFrom: String?  // the title of the author's other book with the same voice
+    var later: [String] = []  // older voices after a time jump: "From Book Three · Chapter 1: 17 years old"
     var sample: VoiceSample?
 }
 

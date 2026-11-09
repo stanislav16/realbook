@@ -331,6 +331,9 @@ def describe_character(char: dict) -> str:
         ("male", "adult"): "An adult man", ("female", "adult"): "An adult woman",
         ("male", "old"): "An elderly man in his late seventies", ("female", "old"): "An elderly woman in her late seventies",
     }.get((gender, age)) or {"child": "A child", "young": "A young adult", "old": "An elderly person"}.get(age, "An adult")
+    if years := char.get("years"):  # a later voice: how old they are now ("A 20-year-old man")
+        noun = {"male": "boy" if years < 18 else "man", "female": "girl" if years < 18 else "woman"}.get(gender, "child" if years < 13 else "person")
+        who = f"A {years}-year-old {noun}"
     pitch = char.get("pitch", 0)
     # How the voice sounds: from the local AI's reading of the book when there is one; otherwise
     # unremarkable voices get a timbre of their own, so two plain characters don't sound alike.

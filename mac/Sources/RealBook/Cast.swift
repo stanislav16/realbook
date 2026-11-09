@@ -23,9 +23,14 @@ struct Person: Codable, Identifiable, Equatable {
     /// The author's other book this voice comes from, so the person sounds the same in both.
     var voice_from: VoiceFrom?
     struct VoiceFrom: Codable, Equatable { var book: String; var title: String }
+    /// Voices for later in the book, when they're older (after a time jump); each one is a Person too.
+    var later: [Person]?
+    var from: Int?
+    var chapter: String?
+    var years: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, gender, age, accent, summary, lines, evidence, aliases, other_names, not_person, voice, rate, pitch_shift, locked, designed_from, voice_description, voice_from
+        case id, name, gender, age, accent, summary, lines, evidence, aliases, other_names, not_person, voice, rate, pitch_shift, locked, designed_from, voice_description, voice_from, later, from, chapter, years
     }
 
     init(from decoder: Decoder) throws {  // the narrator has no id or name of its own
@@ -48,6 +53,16 @@ struct Person: Codable, Identifiable, Equatable {
         designed_from = try c.decodeIfPresent(String.self, forKey: .designed_from)
         voice_description = try c.decodeIfPresent(String.self, forKey: .voice_description)
         voice_from = try c.decodeIfPresent(VoiceFrom.self, forKey: .voice_from)
+        later = try c.decodeIfPresent([Person].self, forKey: .later)
+        from = try c.decodeIfPresent(Int.self, forKey: .from)
+        chapter = try c.decodeIfPresent(String.self, forKey: .chapter)
+        years = try c.decodeIfPresent(Int.self, forKey: .years)
+    }
+
+    /// How old a later voice is: "19 years old" or "a young adult".
+    var ageText: String {
+        if let years { return "\(years) years old" }
+        return ["child": "a child", "young": "a young adult", "adult": "an adult", "old": "old"][age ?? ""] ?? ""
     }
 
     var searchText: String { ([name] + (aliases ?? []) + (other_names ?? [])).joined(separator: " ").lowercased() }
@@ -119,9 +134,10 @@ struct CastPanel: View {
     @State private var confirm: Analysis?
 
     enum CastSheet: Identifiable {
-        case rename(Person), merge(Person), new, export, importReview
+        case rename(Person), merge(Person), new, export, importReview, later(Person)
         var id: String {
             switch self {
+            case .later(let p): "later\(p.id)"
             case .rename(let p): "rename\(p.id)"
             case .merge(let p): "merge\(p.id)"
             case .new: "new"
@@ -234,6 +250,7 @@ struct CastPanel: View {
                     Menu {
                         Button("Rename…") { sheet = .rename(p) }
                         Button("Merge Into…") { sheet = .merge(p) }
+                        Button("Add Older Voice…") { sheet = .later(p) }.help("From a later chapter on, after a time jump, \(p.name) is older and sounds it")
                         Divider()
                         Button("Remove", role: .destructive) { removing = p }
                     } label: {
@@ -253,6 +270,33 @@ struct CastPanel: View {
             }
             VoiceControls(person: p, who: p.id, voices: voices, text: isNarrator ? "" : sampleLine(p.id), reader: reader, designing: designing) { await load() }
             if p.locked == true { Text("Voice kept by you: updates and re-casts won't change it.").font(.caption2).foregroundStyle(.secondary) }
+            ForEach(p.later ?? []) { stage in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Label("From \(stage.chapter ?? "chapter \((stage.from ?? 0) + 1)")", systemImage: "hourglass").font(.caption.weight(.semibold)).lineLimit(2)
+                        Spacer(minLength: 4)
+                        Text(stage.ageText).font(.caption).foregroundStyle(.secondary)
+                        Button { removeLater(p, stage) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)) }
+                            .buttonStyle(.borderless).help("Remove this older voice: \(p.name) keeps one voice all through")
+                    }
+                    VoiceControls(person: stage, who: stage.id, voices: voices, text: sampleLine(p.id), reader: reader, designing: designing) { await load() }
+                    if stage.locked == true { Text("Voice kept by you.").font(.caption2).foregroundStyle(.secondary) }
+                }
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 1).fill(.quaternary).frame(width: 2) }
+            }
+        }
+    }
+
+    private func removeLater(_ p: Person, _ stage: Person) {
+        Task {
+            do {
+                _ = try await api.data("api/books/\(reader.id)/characters/\(p.id)/later/\(stage.from ?? 0)", method: "DELETE")
+                await load()
+                await reader.refreshBook()
+            } catch {
+                reader.problem = error.localizedDescription
+            }
         }
     }
 
@@ -292,6 +336,7 @@ struct CastPanel: View {
         case .new: NewCharacterSheet(api: api, book: reader.id, done: { _ in done() })
         case .export: ReviewExportSheet(reader: reader) { sheet = nil }
         case .importReview: ReviewImportSheet(reader: reader, done: done)
+        case .later(let p): LaterVoiceSheet(person: p, reader: reader, done: done)
         }
     }
 
@@ -496,6 +541,64 @@ struct VoiceControls: View {
             } catch {
                 reader.problem = error.localizedDescription
             }
+        }
+    }
+}
+
+/// A voice for a character from a later chapter on, when a time jump has made them older.
+struct LaterVoiceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let person: Person
+    let reader: Reader
+    let done: () -> Void
+    @State private var chapter = 1
+    @State private var age = "young"
+    @State private var years = ""
+    @State private var problem: String?
+
+    private var chapters: [(Int, String)] {
+        (reader.book?.toc ?? []).enumerated().dropFirst().map { i, e in (i, [e.section, e.title].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Older Voice for \(person.name)").font(.headline)
+            Text("After a time jump, \(person.name) can sound older: from the chapter you choose, their lines are read in a voice for their new age. Earlier chapters keep the voice they have now.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Form {
+                Picker("From", selection: $chapter) { ForEach(chapters, id: \.0) { Text($0.1).tag($0.0) } }
+                Picker("Age", selection: $age) {
+                    Text("Child (under 13)").tag("child")
+                    Text("Young (13 to 29)").tag("young")
+                    Text("Adult (30 to 59)").tag("adult")
+                    Text("Old (60 and over)").tag("old")
+                }
+                TextField("Years (optional)", text: $years, prompt: Text("e.g. 20"))
+            }
+            if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Add Voice") {
+                    Task {
+                        do {
+                            var body: [String: Any] = ["from_chapter": chapter, "age": age]
+                            if let n = Int(years.trimmingCharacters(in: .whitespaces)) { body["years"] = n }
+                            _ = try await reader.api.data("api/books/\(reader.id)/characters/\(person.id)/later", method: "POST", json: body)
+                            done()
+                        } catch {
+                            problem = error.localizedDescription
+                        }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!years.trimmingCharacters(in: .whitespaces).isEmpty && Int(years.trimmingCharacters(in: .whitespaces)) == nil)
+            }
+        }
+        .padding(20).frame(width: 440)
+        .onAppear {
+            chapter = max(1, reader.chapter)
+            age = ["child": "young", "young": "adult", "adult": "old"][person.age ?? "adult"] ?? "old"
         }
     }
 }
@@ -772,7 +875,7 @@ struct ReviewImportSheet: View {
                     Task {
                         do {
                             let r = try await reader.api.object("api/books/\(reader.id)/review/import", method: "POST", json: ["text": text])
-                            let parts: [(String, String)] = [("speakers", "speakers"), ("characters", "characters"), ("added", "new"), ("merged", "merged"), ("said", "pronunciations")]
+                            let parts: [(String, String)] = [("speakers", "speakers"), ("characters", "characters"), ("added", "new"), ("merged", "merged"), ("said", "pronunciations"), ("later", "later voices")]
                             let bits = parts.compactMap { key, name in (r[key] as? Int).flatMap { $0 > 0 ? "\($0) \(name)" : nil } }
                             let skipped = r["skipped_count"] as? Int ?? 0
                             model.say("Review imported: \(bits.isEmpty ? "nothing to change" : bits.joined(separator: ", "))\(skipped > 0 ? " (\(skipped) entries didn't match the book and were skipped)" : "")", seconds: 6)

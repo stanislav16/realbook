@@ -31,6 +31,7 @@ What to check:
 3. Voices. For each main character, how does their voice sound? Give "sound": 2-3 words about the voice itself, from the book where it says (e.g. "sweet, musical tenor", "gravelly"), not about their personality or behaviour. Voices are read naturally; lines the book says are whispered, shouted or pleaded are read that way automatically, so don't describe acting. Avoid the words warm, soft, husky, rich, low, quiet, breathy and whisper (they make the voices muffled).
 4. Pronunciation. A text-to-speech voice guesses at unusual words and may say them differently each time. This covers every unusual word in the book, not only characters: places and planets, families and houses, organisations, invented words and titles. For words it could get wrong, give a respelling that an English reader would say correctly: one word spelled with ordinary letters, no hyphens, capitals for stress or phonetic symbols. When the name sounds like a real English word, use that word: voices say real words the same way every time, but can still guess at a made-up spelling, above all a short one on its own (e.g. "Piter": "Peter", "Feyd": "Fade", "Atreides": "Atraydeez", "Gesserit": "Guesserit"). Give a hyphenated name its own entry if its parts are respelled differently ("Feyd-Rautha": "Fayd-Rawthuh"). Leave out words that are pronounced the way they look.
 5. Narrator. Who tells the book: "author" (the author speaks to the reader in their own voice: non-fiction, a memoir), "character" (a character tells the story as "I") or "storyteller" (an unnamed voice tells a story about other people)? For an author or a character, are they a man or a woman? The narrator's voice follows this; it is listed under "Narrator" below the characters.
+6. Time jumps. Does the story jump forward in time so far that a main character would sound different afterwards: a child grown into a teenager or an adult, a teenager into a grown man or woman, an adult grown old? Give "later" for them: the chapter they first appear older in (the number in the line ids, e.g. 40 for {{40:…}}), their age group then and their age in years if the book says or implies it. Don't list ageing of a year or two, or characters already listed with that later voice.
 
 Reply with ONE JSON code block and nothing else needed. Include ONLY changes. Format:
 
@@ -47,7 +48,8 @@ Reply with ONE JSON code block and nothing else needed. Include ONLY changes. Fo
   }},
   "merge": {{"paul-s-mother": "jessica"}},
   "pronunciations": {{"Piter": "Peter"}},
-  "narrator": {{"teller": "author", "gender": "male"}}
+  "narrator": {{"teller": "author", "gender": "male"}},
+  "later": {{"paul": [{{"from": 40, "age": "young", "years": 17}}]}}
 }}
 ```
 
@@ -56,17 +58,19 @@ Rules for the reply:
 - "characters" entries may contain any of: name, gender (male/female/unknown), age (child = under 13, young = 13-29, adult = 30-59, old = 60+), accent (one of: {accents}; "" if the book gives none), pitch (low/medium/high), pace (slow/normal/fast), sound.
 - "merge" maps a duplicate's id to the id of the same person; its lines move there.
 - "pronunciations" maps a word as written in the book (a name, place, group or invented word) to how to say it.
+- "later" maps a character id to a list of later voices: from (a chapter number), age (child/young/adult/old) and years (a number, if known).
 - "narrator" has teller (author/character/storyteller) and gender (male/female/unknown); include it only if the listed narrator is wrong.
 - Leave out everything that is already right. If nothing needs changing, reply with "speakers": {{}}.
 """
 
 
 def _cast_table(book: dict) -> str:
-    rows = ["| id | name | also called | lines | gender | age | accent | sound | manner |", "|---|---|---|---|---|---|---|---|---|"]
+    rows = ["| id | name | also called | lines | gender | age | accent | sound | manner | later voices |", "|---|---|---|---|---|---|---|---|---|---|"]
     for c in sorted(book["characters"], key=lambda c: -c.get("lines", 0)):
         aka = ", ".join(dict.fromkeys([*c.get("other_names", []), *c.get("aliases", [])]))[:80]
+        later = "; ".join(f"from {st['from']}: {st['age']}" + (f", {st['years']}" if st.get("years") else "") for st in c.get("later", []))
         rows.append(f"| {c['id']} | {c['name']} | {aka} | {c.get('lines', 0)} | {c.get('gender', '')} | {c.get('age', '')} | "
-                    f"{c.get('accent', '')} | {c.get('sound', '')} | {c.get('manner', '')} |")
+                    f"{c.get('accent', '')} | {c.get('sound', '')} | {c.get('manner', '')} | {later} |")
     return "\n".join(rows)
 
 
@@ -253,10 +257,32 @@ def apply(book: dict, text: str) -> dict:
         local_analyzer.set_teller(book, {"teller": told["teller"], "gender": gender}, "review")
         narrator = 1
 
+    older = 0
+    for cid, stages in (data.get("later") or {}).items():
+        c = next((x for x in book["characters"] if x["id"] == cid), None)
+        if c is None or not isinstance(stages, list):
+            skipped.append(f"later voice of {cid}")
+            continue
+        for raw in stages:
+            start = raw.get("from") if isinstance(raw, dict) else None
+            years = raw.get("years") if isinstance(raw, dict) and isinstance(raw.get("years"), int) and 0 < raw["years"] <= 120 else None
+            if not isinstance(start, int) or not 0 < start < len(book["chapters"]) or raw.get("age") not in voices.AGES:
+                skipped.append(f"later voice of {cid}")
+                continue
+            ch = book["chapters"][start]
+            kept = next((st for st in c.get("later", []) if st["from"] == start), {})
+            stage = {**kept, "id": f"{cid}@{start}", "name": c["name"], "from": start, "age": raw["age"], "by": "review",
+                     "chapter": " · ".join(x for x in (ch.get("section"), ch["title"]) if x)}
+            stage.pop("years", None)
+            if years:
+                stage["years"] = years
+            c["later"] = sorted([st for st in c.get("later", []) if st["from"] != start] + [stage], key=lambda st: st["from"])
+            older += 1
+
     store.recount_lines(book)
     voices.cast_book(book)
     import time
 
     book.setdefault("ai_done", {})["review"] = time.time()
-    return {"speakers": speakers, "characters": profiles, "added": added, "merged": merged, "said": len(said), "narrator": narrator, "skipped": skipped[:20],
+    return {"speakers": speakers, "characters": profiles, "added": added, "merged": merged, "said": len(said), "narrator": narrator, "later": older, "skipped": skipped[:20],
             "skipped_count": len(skipped)}

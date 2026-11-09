@@ -304,25 +304,73 @@ def _same_person(c: dict, other: dict) -> int:
     return 1 if mine in _names(other) or theirs in _names(c) else 0
 
 
-def _voice_of(person: dict, narrator: bool) -> dict:
-    """What it takes to give someone else exactly this person's voice."""
+def _source(book_id: str, who: str) -> dict | None:
+    """The narrator or a character in another book, as they are now."""
+    try:
+        other = store.load(book_id)
+    except KeyError:
+        return None
+    return other.get("narrator") if who == "narrator" else next((c for c in other["characters"] if c["id"] == who), None)
+
+
+def _voice_of(person: dict, narrator: bool, depth: int = 0) -> dict:
+    """What it takes to give someone else exactly this person's voice, as it is now: when theirs comes
+    from a book before that one, from there."""
     kept = bool(person.get("locked") and person.get("voice"))
-    out = {"voice": person.get("voice", ""), "rate": person.get("rate", DEFAULT_RATE), "pitch_shift": person.get("pitch_shift", 0)}
-    same = person.get("voice_same")
-    if same and not kept and not person.get("voice_description"):  # they have it from a book before that one
-        return {**same, **out}
+    if not kept and not person.get("voice_description") and (where := person.get("voice_from")):
+        source = _source(where["book"], where["character"]) if depth < 5 else None
+        if source:
+            return _voice_of(source, narrator, depth + 1)
+        if person.get("voice_same"):  # that book is gone: as it was
+            return person["voice_same"]
     automatic = designed.narrator_description(person) if narrator else designed.describe_character(person)
-    return {**out, "kept": kept, "seed": "narrator" if narrator else person["id"], "take": person.get("voice_take", 0),
-            "description": (person.get("designed_from") if kept else None) or person.get("voice_description") or automatic}
+    return {"voice": person.get("voice", ""), "rate": person.get("rate", DEFAULT_RATE), "pitch_shift": person.get("pitch_shift", 0),
+            "kept": kept, "seed": "narrator" if narrator else person["id"], "take": person.get("voice_take", 0),
+            "description": (person.get("designed_from") if kept else None) or person.get("voice_description") or automatic,
+            "gender": person.get("gender", "unknown"), **({"teller": person.get("teller", "author")} if narrator else {})}
+
+
+def _fits(person: dict, same: dict, narrator: bool) -> bool:
+    """Whether a voice still suits them: the book may say later (its AI reading, a review) that this
+    one is a woman where the other book's was a man, or that a character tells this book."""
+    genders = {person.get("gender", "unknown"), same.get("gender", "unknown")} - {"unknown"}
+    return len(genders) < 2 and (not narrator or person.get("teller", "author") == same.get("teller", "author"))
+
+
+def follow(book: dict) -> bool:
+    """Voices from the author's other books follow them there (a new description or take, a review
+    of that book), unless kept by hand here; one that no longer suits the person here is let go.
+    Returns whether anything changed (the book then needs casting)."""
+    if not book.get("carry"):
+        return False
+    changed = False
+    for who, person in [("narrator", book.get("narrator") or {})] + [(c["id"], c) for c in book["characters"]]:
+        where = person.get("voice_from")
+        if not where or person.get("locked"):
+            continue
+        source = _source(where["book"], where["character"])
+        same = _voice_of(source, who == "narrator") if source else person.get("voice_same")
+        if not same:
+            continue
+        if not _fits(person, same, who == "narrator"):
+            person.pop("voice_same", None)
+            person.pop("voice_from", None)
+            person["carry_checked"] = False  # it may suit someone in another of the books
+            changed = True
+        elif same != person.get("voice_same"):
+            person["voice_same"] = same
+            changed = True
+    return changed
 
 
 def carry_over(book: dict) -> None:
     """Characters the author's other books already have get the same voice here, so a trilogy sounds
-    the same all through: matched by name, the book opened most recently first. Each person is looked
-    at once (a voice doesn't change under the listener later), and not at all in books from before
-    this (no "carry" in them) or in which they were given a voice of their own."""
+    the same all through: matched by name, the book opened most recently first. Each person is matched
+    once, and not at all in books from before this (no "carry" in them) or in which they were given a
+    voice of their own; after that their voice follows the other book's (see follow)."""
     if not book.get("carry") or not _author(book):
         return
+    follow(book)
     todo = [c for c in book["characters"] if not c.get("carry_checked")]
     narrator = book.get("narrator") or {}
     if not todo and narrator.get("carry_checked"):
@@ -337,6 +385,15 @@ def carry_over(book: dict) -> None:
     others.sort(key=lambda b: -max(b.get("opened", 0), b.get("created", 0)))
     taken = {f"{c['voice_from']['book']}/{c['voice_from']['character']}" for c in book["characters"] if c.get("voice_from")}
     own = set(book.get("own_voices", []))
+
+    def give(person: dict, other: dict, source: dict, narrator: bool) -> bool:
+        same = _voice_of(source, narrator)
+        if not _fits(person, same, narrator) or _from(same, book["id"], other, source):
+            return False
+        person["voice_same"] = same
+        person["voice_from"] = {"book": other["id"], "title": other["title"], "character": "narrator" if narrator else source["id"]}
+        return True
+
     for c in sorted(todo, key=lambda c: -c.get("lines", 0)):
         c["carry_checked"] = True
         if c["id"] in own or c.get("voice_description") or c.get("locked"):
@@ -344,23 +401,28 @@ def carry_over(book: dict) -> None:
         for other in others:
             match = max(((_same_person(c, o), o.get("lines", 0), o) for o in other.get("characters", [])
                          if f"{other['id']}/{o['id']}" not in taken), key=lambda m: m[:2], default=(0, 0, None))
-            if match[0]:
-                o = match[2]
-                c["voice_same"] = _voice_of(o, narrator=False)
-                c["voice_from"] = {"book": other["id"], "title": other["title"], "character": o["id"]}
-                taken.add(f"{other['id']}/{o['id']}")
+            if match[0] and give(c, other, match[2], narrator=False):
+                taken.add(f"{other['id']}/{match[2]['id']}")
                 break
     if not narrator.get("carry_checked"):
         narrator["carry_checked"] = True
         if "narrator" not in own and not narrator.get("voice_description") and not narrator.get("locked"):
-            teller = narrator.get("teller", "author")
             for other in others:
-                theirs = other.get("narrator") or {}
-                if theirs.get("voice") and theirs.get("teller", "author") == teller:
-                    narrator["voice_same"] = _voice_of(theirs, narrator=True)
-                    narrator["voice_from"] = {"book": other["id"], "title": other["title"], "character": "narrator"}
+                if (other.get("narrator") or {}).get("voice") and give(narrator, other, other["narrator"], narrator=True):
                     break
         book["narrator"] = narrator
+
+
+def _from(same: dict, book_id: str, other: dict, source: dict) -> bool:
+    """Whether the source's voice comes, by way of other books, from this one (Re-cast of an older
+    book whose people another book took): taking it back would go round in a circle."""
+    seen, where = 0, source.get("voice_from")
+    while where and seen < 5:
+        if where["book"] == book_id:
+            return True
+        nxt = _source(where["book"], where["character"])
+        where, seen = (nxt or {}).get("voice_from"), seen + 1
+    return False
 
 
 def own_voice(book: dict, who: str) -> None:

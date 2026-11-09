@@ -58,9 +58,14 @@ async def guard_remote(request: Request, call_next):
 
 def _book(book_id: str) -> dict:
     try:
-        return store.load(book_id)
+        b = store.load(book_id)
     except KeyError:
         raise HTTPException(404, "Book not found")
+    if voices.follow(b):  # a voice from the author's other book changed there
+        with store.lock(book_id):
+            voices.cast_book(b)
+            store.save(b)
+    return b
 
 
 def _chapter(book: dict, n: int) -> dict:

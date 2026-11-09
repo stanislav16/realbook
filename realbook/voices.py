@@ -287,16 +287,20 @@ def _author(book: dict) -> frozenset[str]:
     return frozenset() if words <= {"unknown", "author", "anonymous"} else words
 
 
+AGES = {"child": 0, "young": 1, "adult": 2, "old": 3}
+# Other names that are descriptions, not names ("The courier", "Paul's Mother", "a Bene Gesserit Lady"):
+# another book's "The courier" is someone else.
+NOT_A_NAME = re.compile(r"^(the|a|an|his|her|their|my|your|our)\b|['’]s\b", re.IGNORECASE)
+
+
 def _names(c: dict) -> set[str]:
-    return {" ".join(n.lower().split()) for n in [c.get("name", "")] + c.get("aliases", []) + c.get("other_names", []) if n.strip()}
+    return {" ".join(n.lower().split()) for n in [c.get("name", "")] + c.get("aliases", []) + c.get("other_names", [])
+            if n.strip() and not NOT_A_NAME.search(n.strip())}
 
 
 def _same_person(c: dict, other: dict) -> int:
     """2 when they have the same name, 1 when one's name is among the other's names, else 0."""
-    if c.get("not_person") or other.get("not_person"):
-        return 0
-    genders = {c.get("gender", "unknown"), other.get("gender", "unknown")} - {"unknown"}
-    if len(genders) > 1:
+    if c.get("not_person") or other.get("not_person") or not _fits(c, other, narrator=False):
         return 0
     mine, theirs = " ".join(c.get("name", "").lower().split()), " ".join(other.get("name", "").lower().split())
     if mine and mine == theirs:
@@ -327,14 +331,19 @@ def _voice_of(person: dict, narrator: bool, depth: int = 0) -> dict:
     return {"voice": person.get("voice", ""), "rate": person.get("rate", DEFAULT_RATE), "pitch_shift": person.get("pitch_shift", 0),
             "kept": kept, "seed": "narrator" if narrator else person["id"], "take": person.get("voice_take", 0),
             "description": (person.get("designed_from") if kept else None) or person.get("voice_description") or automatic,
-            "gender": person.get("gender", "unknown"), **({"teller": person.get("teller", "author")} if narrator else {})}
+            "gender": person.get("gender", "unknown"),
+            **({"teller": person.get("teller", "author")} if narrator else {"age": person.get("age", "adult")})}
 
 
 def _fits(person: dict, same: dict, narrator: bool) -> bool:
-    """Whether a voice still suits them: the book may say later (its AI reading, a review) that this
-    one is a woman where the other book's was a man, or that a character tells this book."""
+    """Whether a voice suits them: the book may say later (its AI reading, a review) that this one is
+    a woman where the other book's was a man, a child where it was a grown man (Leto II, not Duke
+    Leto: a year or two older is fine), or that someone in the story tells this book."""
     genders = {person.get("gender", "unknown"), same.get("gender", "unknown")} - {"unknown"}
-    return len(genders) < 2 and (not narrator or person.get("teller", "author") == same.get("teller", "author"))
+    if narrator:
+        return len(genders) < 2 and (person.get("teller") == "character") == (same.get("teller") == "character")
+    ages = AGES.get(person.get("age", "adult"), 2), AGES.get(same.get("age", "adult"), 2)
+    return len(genders) < 2 and abs(ages[0] - ages[1]) < 2
 
 
 def follow(book: dict) -> bool:
@@ -373,7 +382,9 @@ def carry_over(book: dict) -> None:
     follow(book)
     todo = [c for c in book["characters"] if not c.get("carry_checked")]
     narrator = book.get("narrator") or {}
-    if not todo and narrator.get("carry_checked"):
+    # Who tells a book is found after it's added (by its AI reading): the narrator is looked at again then.
+    told = f"{narrator.get('teller', '')}/{narrator.get('gender', '')}"
+    if not todo and (narrator.get("carry_checked") == told or narrator.get("voice_from")):
         return
     others = []
     for s in store.list_books():
@@ -404,8 +415,8 @@ def carry_over(book: dict) -> None:
             if match[0] and give(c, other, match[2], narrator=False):
                 taken.add(f"{other['id']}/{match[2]['id']}")
                 break
-    if not narrator.get("carry_checked"):
-        narrator["carry_checked"] = True
+    if narrator.get("carry_checked") != told and not narrator.get("voice_from"):
+        narrator["carry_checked"] = told
         if "narrator" not in own and not narrator.get("voice_description") and not narrator.get("locked"):
             for other in others:
                 if (other.get("narrator") or {}).get("voice") and give(narrator, other, other["narrator"], narrator=True):

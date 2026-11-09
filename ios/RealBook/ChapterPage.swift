@@ -215,7 +215,10 @@ struct ChapterPage: UIViewRepresentable {
             guard force || line.minY < top + 30 || line.maxY > top + visible - 30 else { return }
             let target = line.minY - insets.top - max(40, (visible - line.height) * 0.3)
             let most = max(-insets.top, tv.contentSize.height - tv.bounds.height + insets.bottom)
-            tv.setContentOffset(CGPoint(x: 0, y: min(max(-insets.top, target), most)), animated: animated)
+            let to = CGPoint(x: 0, y: min(max(-insets.top, target), most))
+            // Only a short move is animated: catching up with the Mac can be many screens away, and
+            // scrolling through them lays out every line on the way, which stutters.
+            tv.setContentOffset(to, animated: animated && abs(to.y - tv.contentOffset.y) < tv.bounds.height * 1.5)
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { parent.onScrolledAway() }

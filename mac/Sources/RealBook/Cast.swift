@@ -877,6 +877,7 @@ struct ReviewImportSheet: View {
                             let r = try await reader.api.object("api/books/\(reader.id)/review/import", method: "POST", json: ["text": text])
                             let parts: [(String, String)] = [("speakers", "speakers"), ("characters", "characters"), ("added", "new"), ("merged", "merged"), ("said", "pronunciations"), ("later", "later voices")]
                             let bits = parts.compactMap { key, name in (r[key] as? Int).flatMap { $0 > 0 ? "\($0) \(name)" : nil } }
+                                + ((r["teller"] as? Int ?? 0) > 0 ? ["the narrator"] : [])
                             let skipped = r["skipped_count"] as? Int ?? 0
                             model.say("Review imported: \(bits.isEmpty ? "nothing to change" : bits.joined(separator: ", "))\(skipped > 0 ? " (\(skipped) entries didn't match the book and were skipped)" : "")", seconds: 6)
                             await reader.refreshBook()

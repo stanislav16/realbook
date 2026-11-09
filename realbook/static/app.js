@@ -1163,7 +1163,7 @@ async function importReview() {
     b.ai_done = { ...(b.ai_done || {}), review: Date.now() / 1000 };
     S.chapter = await api(`/api/books/${b.id}/chapters/${S.chapterIdx}`);
     voicesChanged(); renderCast(); renderPage(); highlight();
-    const bits = [r.speakers && `${r.speakers} speakers`, r.characters && `${r.characters} characters`, r.added && `${r.added} new`, r.merged && `${r.merged} merged`, r.said && `${r.said} pronunciations`, r.later && `${r.later} later voices`, r.narrator && "the narrator"].filter(Boolean);
+    const bits = [r.speakers && `${r.speakers} speakers`, r.characters && `${r.characters} characters`, r.added && `${r.added} new`, r.merged && `${r.merged} merged`, r.said && `${r.said} pronunciations`, r.later && `${r.later} later voices`, r.teller && "the narrator"].filter(Boolean);
     toast(`Review imported: ${bits.join(", ") || "nothing to change"}${r.skipped_count ? ` (${r.skipped_count} entries didn't match the book and were skipped)` : ""}`, 6000);
   } catch (e) { toast(e.message, 6000); }
 }

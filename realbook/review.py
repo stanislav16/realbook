@@ -284,5 +284,5 @@ def apply(book: dict, text: str) -> dict:
     import time
 
     book.setdefault("ai_done", {})["review"] = time.time()
-    return {"speakers": speakers, "characters": profiles, "added": added, "merged": merged, "said": len(said), "narrator": narrator, "later": older, "skipped": skipped[:20],
+    return {"speakers": speakers, "characters": profiles, "added": added, "merged": merged, "said": len(said), "teller": narrator, "later": older, "skipped": skipped[:20],
             "skipped_count": len(skipped)}

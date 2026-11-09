@@ -130,6 +130,9 @@ def create(filename: str, data: bytes) -> dict:
         "carry": 1,  # its characters get the voices they have in the author's other books (voices.carry_over)
     }
     apply_analysis(book, heuristic.analyze(chapters), "heuristic")
+    from . import compounds
+
+    compounds.add_to(book)  # "wormsign" said as "worm sign", the same way every time
     _store_files(book, filename, data, imported)
     save(book)
     return book
@@ -345,6 +348,15 @@ def prepare() -> None:
     from . import tts
 
     values = settings()
+    from . import compounds
+
+    if compounds.available():  # joined words ("wormsign") said as their two words, once per book
+        for s_ in list_books():
+            book = load(s_["id"])
+            if not book.get("compounds_checked"):
+                with lock(book["id"]):
+                    compounds.add_to(book)
+                    save(book)
     if values.get("audio_version", 1) < tts.AUDIO_VERSION:
         # Lines are made again, at the current quality, the next time they're played.
         import shutil

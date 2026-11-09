@@ -955,6 +955,10 @@ function voiceControls(person, who, save, text) {
     el("div", { class: "voice-row" },
       voiceSelect(s.voice, pick),
       el("button", { class: "button small", title: "Hear this voice", onclick: () => preview(s, text) }, "▶")),
+    person.voice_from ? el("div", { class: "voice-from" },
+      el("span", {}, `Same voice as in ${person.voice_from.title}`),
+      el("button", { class: "button small", title: "A voice of their own in this book, from how this book describes them",
+        onclick: () => (isDesigned(s.voice) ? designVoice(who, { description: "" }, text) : ownVoice(who, text)) }, "Own Voice")) : null,
     ...(designing() ? designControls(person, who, text) : []),
     // Designed voices get their pitch and pace from the description.
     ...(isDesigned(s.voice) ? [] : [
@@ -968,7 +972,8 @@ function designControls(person, who, text) {
   const area = el("textarea", { class: "design-text", rows: 3, spellcheck: "false",
     placeholder: "e.g. An old fisherman with a rough, low voice and a strong Irish accent" }, person.designed_from || "");
   return [
-    el("label", { class: "design" }, el("span", {}, person.voice_description ? "Your description (used instead of the book's)" : "Voice description, from the book"), area),
+    el("label", { class: "design" }, el("span", {}, person.voice_description ? "Your description (used instead of the book's)"
+      : person.voice_from ? `Voice description, from ${person.voice_from.title}` : "Voice description, from the book"), area),
     el("div", { class: "design-actions" },
       el("button", { class: "button small", title: "Design a voice from this description", onclick: () => designVoice(who, { description: area.value }, text) }, "Use Description"),
       el("button", { class: "button small", title: "Same description, a different voice", onclick: () => designVoice(who, { new_take: true }, text) }, "New Take"),
@@ -993,6 +998,18 @@ async function keepVoice(person, who) {
     }
     renderCast();
     toast("Voice kept. Updates and re-runs won't change it");
+  } catch (e) { toast(e.message); }
+}
+
+// Not the voice from the author's other book: one cast for this book.
+async function ownVoice(who, text) {
+  const b = S.book;
+  try {
+    const updated = await api(`/api/books/${b.id}/own-voice/${who}`, { method: "POST" });
+    if (who === "narrator") b.narrator = updated; else b.cast = b.cast.map((c) => (c.id === who ? updated : c));
+    voicesChanged();
+    renderCast();
+    preview(updated, text);
   } catch (e) { toast(e.message); }
 }
 

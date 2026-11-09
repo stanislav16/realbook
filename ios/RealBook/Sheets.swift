@@ -127,6 +127,9 @@ struct CastRow: View {
                 if let voice = member.voice, !voice.isEmpty {
                     Text(voice).font(.footnote).italic().foregroundStyle(.secondary).lineLimit(3)
                 }
+                if let from = member.voiceFrom {
+                    Label("Same voice as in \(from)", systemImage: "books.vertical").font(.footnote).foregroundStyle(.secondary)
+                }
             }
             if member.sample != nil {
                 Button { player.sample(member) } label: {

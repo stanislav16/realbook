@@ -125,7 +125,7 @@ def apply(book: dict, results: dict[str, dict]) -> int:
         changed += 1
     if results.get(NARRATOR_KEY):
         set_teller(book, results[NARRATOR_KEY], "local-ai")
-    book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
+    voices.cast_book(book)
     return changed
 
 

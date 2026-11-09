@@ -254,7 +254,7 @@ def apply(book: dict, text: str) -> dict:
         narrator = 1
 
     store.recount_lines(book)
-    book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
+    voices.cast_book(book)
     import time
 
     book.setdefault("ai_done", {})["review"] = time.time()

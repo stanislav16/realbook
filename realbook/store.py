@@ -127,6 +127,7 @@ def create(filename: str, data: bytes) -> dict:
         "title": title, "author": author, "created": time.time(), "quote_style": style,
         "analyzer": "heuristic", "narrator": {}, "characters": [], "chapters": chapters,
         "position": {"chapter": 0, "segment": 0}, "source": None, "cover": None,
+        "carry": 1,  # its characters get the voices they have in the author's other books (voices.carry_over)
     }
     apply_analysis(book, heuristic.analyze(chapters), "heuristic")
     _store_files(book, filename, data, imported)
@@ -175,9 +176,8 @@ def _position_at(chapters: list[dict], fraction: float) -> dict:
 def apply_analysis(book: dict, result: dict, analyzer: str) -> None:
     """Install a fresh cast (from either analyzer) and give everyone a voice."""
     book["analyzer"] = analyzer
-    narrator, cast = voices.cast(result["characters"], book.get("narrator"))
-    book["narrator"] = narrator
-    book["characters"] = cast
+    book["characters"], book["narrator"] = result["characters"], book.get("narrator") or {}
+    voices.cast_book(book)
 
 
 def recount_lines(book: dict) -> None:
@@ -195,7 +195,7 @@ def recast_all() -> None:
     for summary_ in list_books():
         book = load(summary_["id"])
         with lock(book["id"]):
-            book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
+            voices.cast_book(book)
             save(book)
 
 
@@ -291,7 +291,7 @@ def fix_fake_characters(book: dict) -> bool:
                 seg["speaker"] = who if who in have else None
     book["characters"] = [c for c in book["characters"] if c["id"] not in bogus]
     recount_lines(book)
-    book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
+    voices.cast_book(book)
     return True
 
 
@@ -303,7 +303,7 @@ def reprofile(book: dict) -> None:
     for c in book["characters"]:
         if c["id"] in fresh:
             c["pitch"], c["summary"] = fresh[c["id"]]["pitch"], fresh[c["id"]]["summary"]
-    book["narrator"], book["characters"] = voices.cast(book["characters"], book["narrator"])
+    voices.cast_book(book)
 
 
 def rechunk(book: dict) -> None:

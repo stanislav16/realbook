@@ -62,6 +62,7 @@ The iPhone app isn't on the App Store yet. To install it (iOS 17 or later): open
 
 - **Wrong speaker?** Click the coloured name tag in front of a quote and pick the right character, or create a new one. The Cast panel's ••• menu can also find the characters again, or hand the job to Claude.
 - **Don't like a voice?** In the Cast panel, change the voice, pitch or speed. ▶ plays a sample line. Voices you set by hand are kept when you press **Re-cast**.
+- **A series?** When you add a book, characters already in another book by the same author keep the voice they have there, and so does the narrator: a trilogy sounds the same all through. They're matched by name, from the book you opened last. The Cast panel says **Same voice as in …**; **Own Voice** gives them a voice made for this book instead. Books added before this keep their voices until you press **Re-cast**.
 - Keyboard: `space` plays and pauses, `←` / `→` move one line.
 
 ## Voices

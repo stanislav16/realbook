@@ -336,7 +336,12 @@ class VoiceSettings(BaseModel):
 def set_narrator(book_id: str, v: VoiceSettings):
     b = _book(book_id)
     with store.lock(book_id):
+        was = b["narrator"]
         b["narrator"] = {**v.model_dump(), "locked": True}
+        if v.voice == was.get("voice"):  # kept as it is: still the voice from the author's other book
+            b["narrator"].update({k: was[k] for k in ("voice_same", "voice_from", "designed_from") if k in was})
+        elif was.get("voice_from"):
+            b["own_voices"] = sorted(set(b.get("own_voices", [])) | {"narrator"})
         store.save(b)
     return b["narrator"]
 
@@ -347,6 +352,8 @@ def set_character_voice(book_id: str, char_id: str, v: VoiceSettings):
     with store.lock(book_id):
         for c in b["characters"]:
             if c["id"] == char_id:
+                if v.voice != c.get("voice"):
+                    voices.own_voice(b, char_id)
                 c.update(v.model_dump(), locked=True)
                 store.save(b)
                 return c
@@ -358,9 +365,24 @@ def recast(book_id: str):
     """Re-pick voices for every character the user has not set by hand."""
     b = _book(book_id)
     with store.lock(book_id):
-        b["narrator"], b["characters"] = voices.cast(b["characters"], b["narrator"])
+        b["carry"] = 1  # a book from before this gets the voices of the author's other books too
+        voices.cast_book(b)
         store.save(b)
     return {"narrator": b["narrator"], "cast": b["characters"]}
+
+
+@app.post("/api/books/{book_id}/own-voice/{who}")
+def own_voice(book_id: str, who: str):
+    """The narrator or a character gets a voice of their own in this book, not the one they have in
+    the author's other book."""
+    b = _book(book_id)
+    with store.lock(book_id):
+        if who != "narrator" and not any(c["id"] == who for c in b["characters"]):
+            raise HTTPException(404, "Character not found")
+        voices.own_voice(b, who)
+        voices.cast_book(b)
+        store.save(b)
+    return b["narrator"] if who == "narrator" else next(c for c in b["characters"] if c["id"] == who)
 
 
 class Design(BaseModel):
@@ -382,6 +404,12 @@ def design_voice(book_id: str, who: str, d: Design):
         person = find()
         if person is None:
             raise HTTPException(404, "Character not found")
+        same = person.get("voice_same")
+        if same and d.description is not None and d.description.strip() == same["description"] and not d.new_take:
+            d.description = None  # the description it has from the other book, unchanged: the same voice
+        if same and (d.description is not None or d.new_take):
+            voices.own_voice(b, who)  # a voice of their own in this book ("" goes back to this book's description)
+            person = find()
         if d.description is not None:
             text = d.description.strip()[:600]
             own = {k: v for k, v in person.items() if k != "voice_description"}
@@ -393,7 +421,7 @@ def design_voice(book_id: str, who: str, d: Design):
         if d.new_take:
             person["voice_take"] = person.get("voice_take", 0) + 1
         person.pop("locked", None)
-        b["narrator"], b["characters"] = voices.cast(b["characters"], b["narrator"])
+        voices.cast_book(b)
         store.save(b)
         person = find()
     designed.design_ahead([person["voice"]])
@@ -478,10 +506,10 @@ def add_character(book_id: str, nc: NewCharacter):
             cid, i = f"{base}-{i}", i + 1
         char = {"id": cid, "name": nc.name, "aliases": [], "gender": nc.gender, "age": nc.age,
                 "accent": "", "pitch": 0, "pace": 0, "summary": "added by hand", "evidence": [], "lines": 0}
-        _, cast = voices.cast(b["characters"] + [char], b["narrator"])
-        b["characters"] = cast
+        b["characters"].append(char)
+        voices.cast_book(b)
         store.save(b)
-    return next(c for c in cast if c["id"] == cid)
+    return next(c for c in b["characters"] if c["id"] == cid)
 
 
 class Speaker(BaseModel):

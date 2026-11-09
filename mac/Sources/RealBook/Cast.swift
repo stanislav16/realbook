@@ -20,9 +20,12 @@ struct Person: Codable, Identifiable, Equatable {
     var locked: Bool?
     var designed_from: String?
     var voice_description: String?
+    /// The author's other book this voice comes from, so the person sounds the same in both.
+    var voice_from: VoiceFrom?
+    struct VoiceFrom: Codable, Equatable { var book: String; var title: String }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, gender, age, accent, summary, lines, evidence, aliases, other_names, not_person, voice, rate, pitch_shift, locked, designed_from, voice_description
+        case id, name, gender, age, accent, summary, lines, evidence, aliases, other_names, not_person, voice, rate, pitch_shift, locked, designed_from, voice_description, voice_from
     }
 
     init(from decoder: Decoder) throws {  // the narrator has no id or name of its own
@@ -44,6 +47,7 @@ struct Person: Codable, Identifiable, Equatable {
         locked = try c.decodeIfPresent(Bool.self, forKey: .locked)
         designed_from = try c.decodeIfPresent(String.self, forKey: .designed_from)
         voice_description = try c.decodeIfPresent(String.self, forKey: .voice_description)
+        voice_from = try c.decodeIfPresent(VoiceFrom.self, forKey: .voice_from)
     }
 
     var searchText: String { ([name] + (aliases ?? []) + (other_names ?? [])).joined(separator: " ").lowercased() }
@@ -379,8 +383,18 @@ struct VoiceControls: View {
                 Button { Sample.play(person, text: text, api: api) } label: { Image(systemName: "play.fill").font(.system(size: 10)) }
                     .controlSize(.small).help("Hear this voice")
             }
+            if let from = person.voice_from {
+                HStack(spacing: 4) {
+                    Label("Same voice as in \(from.title)", systemImage: "books.vertical").font(.caption2).foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Button("Own Voice") { ownVoice() }
+                        .controlSize(.mini)
+                        .help("Give \(who == "narrator" ? "the narrator" : person.name) a voice of their own in this book, from how this book describes them")
+                }
+            }
             if designing {
-                Text(person.voice_description != nil ? "Your description (used instead of the book's)" : "Voice description, from the book").font(.caption2).foregroundStyle(.secondary)
+                Text(person.voice_description != nil ? "Your description (used instead of the book's)"
+                     : person.voice_from != nil ? "Voice description, from \(person.voice_from!.title)" : "Voice description, from the book").font(.caption2).foregroundStyle(.secondary)
                 TextEditor(text: $description)
                     .font(.caption)
                     .scrollContentBackground(.hidden)
@@ -423,6 +437,19 @@ struct VoiceControls: View {
     }
 
     private var path: String { who == "narrator" ? "api/books/\(reader.id)/narrator" : "api/books/\(reader.id)/characters/\(who)" }
+
+    /// Not the voice from the author's other book: one made for this book.
+    private func ownVoice() {
+        if person.designed { design(["description": ""]) } else { Task {
+            do {
+                _ = try await api.data("api/books/\(reader.id)/own-voice/\(who)", method: "POST")
+                await changed()
+                await reader.refreshBook()
+            } catch {
+                reader.problem = error.localizedDescription
+            }
+        } }
+    }
 
     private func pick(_ voice: String) {
         if voice == "designed" { design([:]) } else { save(voice: voice) }

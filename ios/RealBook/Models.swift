@@ -143,13 +143,17 @@ struct MacBook: Codable {
         var voice: String?
         var rate: Int?
         var pitch_shift: Int?
+        var voice_from: VoiceFrom?
     }
     struct Narrator: Codable {
         var designed_from: String?
         var voice: String?
         var rate: Int?
         var pitch_shift: Int?
+        var voice_from: VoiceFrom?
     }
+    /// The author's other book a voice comes from, so the person sounds the same in both.
+    struct VoiceFrom: Codable { var title: String }
     struct Entry: Codable { var title: String; var section: String?; var segments: Int }
 
     var id: String
@@ -205,6 +209,7 @@ struct CastMember: Identifiable, Equatable {
     var summary: String?
     var lines: Int?
     var voice: String?  // how the voice was described when it was made
+    var voiceFrom: String?  // the title of the author's other book with the same voice
     var sample: VoiceSample?
 }
 

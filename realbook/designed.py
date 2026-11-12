@@ -10,6 +10,7 @@ behind each key lives in models/<engine>/voices/<key>.json and its reference cli
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import itertools
 import json
@@ -847,22 +848,31 @@ def _speak_line(engine: Engine, out: Path, text: str, key: str, style: str = "",
     tune = intonation(text)
 
     found: dict[int, tuple] = {}  # by take, as listening to one takes a moment
+    # A word heard the same wrong way in two takes is the listener mishearing it ("traitor" as
+    # "trader"), not the voice: it no longer counts.
+    misheard: set[tuple[int, str]] = set()
 
-    def faults(s: np.ndarray) -> tuple[int, float, float, float]:
-        # Sound that isn't speech is worst, then the wrong tune, then a clipped end.
+    def faults(s: np.ndarray) -> tuple[int, int, float, float, float]:
+        # Sound that isn't speech and wrong words are worst, then the wrong tune, then a clipped end.
         if id(s) not in found:
             clipped, rise = _ending(s) > CUT_DB, _end_rise(s) if tune else 1.0
             off = max(0.0, rise - MAX_STATEMENT_RISE) if tune == "statement" else max(0.0, MIN_QUESTION_RISE - rise)
+            if tune == "statement":  # its last word said loud and high, like a shout
+                off += max(0.0, _tail_lift(s) - MAX_TAIL_LIFT)
             ran_on = _dots_gaps(s, text)[1] if SPACED_DOTS in text else 0  # ran straight through the dots
-            noise = _stray(engine, s, text)
-            found[id(s)] = (4 * int(noise > 0) + int(clipped) + 2 * int(off > 0) + ran_on, noise, off, _ending(s))
-        return found[id(s)]
+            noise, wrong = _listen(engine, s, text)
+            found[id(s)] = (noise, wrong, off, int(clipped) + ran_on, _ending(s))
+        noise, wrong, off, other, end = found[id(s)]
+        wrong = len(set(wrong) - misheard)
+        return 4 * int(noise > 0) + 4 * int(wrong > 0) + 2 * int(off > 0) + other, wrong, noise, off, end
 
     takes = [samples]  # kept, so a take's id isn't reused while its faults are remembered
     for _ in range(0 if not samples.any() else TUNE_RETRIES if tune == "question" else CUT_RETRIES):  # a pause has no ending to fix
         if not faults(samples)[0]:
             break
         takes.append(again := generate())
+        faults(again)  # listened to
+        misheard |= set(found[id(samples)][1]) & set(found[id(again)][1])
         if faults(again) < faults(samples) and acceptable(again):
             samples = again
     with tempfile.NamedTemporaryFile(suffix=".wav", dir=out.parent, delete=False) as tmp:
@@ -902,6 +912,10 @@ SPEECH_DB = -40
 # stayed under 1.1 and sound like statements ("Do you dream every night?" at 1.01).
 MAX_STATEMENT_RISE = 1.15
 MIN_QUESTION_RISE = 1.1
+# A statement's last 800 ms of voice this much higher than the whole line is its last word shouted
+# ("the familiar scrawl. . . Yooay's." at 1.25-1.32 in half its takes). Of 400 saved lines of Dune, 1%
+# of statements went past it.
+MAX_TAIL_LIFT = 1.2
 TUNE_RETRIES = 3  # a flat question is common, so it gets one more try
 TUNE_VERSION = 1  # in the name of the audio of questions: bump to make only those again
 FADE_IN_MS, FADE_OUT_MS, TAIL_MS = 5, 40, 40
@@ -921,12 +935,13 @@ def _sound_span(samples: np.ndarray) -> tuple[float, float]:
     return (on[0] / 100, (on[-1] + 1) / 100) if len(on) else (0.0, 0.0)
 
 
-def _stray(engine: Engine, samples: np.ndarray, text: str) -> float:
-    """Seconds of sound before the first word the listener hears, or after the last (see LISTENER);
-    0 when there's nothing to go by: no listener yet, or it heard fewer words than `text` has."""
+def _listen(engine: Engine, samples: np.ndarray, text: str) -> tuple[float, list[tuple[int, str]]]:
+    """What the listener (see LISTENER) makes of a take: the seconds of sound before its first word or
+    after its last (see _stray), and the words it heard wrong (see _wrong_words). Nothing while
+    there's no listener yet."""
     model = _listener(engine) if samples.any() else None
     if model is None:
-        return 0.0
+        return 0.0, []
     import mlx.core as mx
 
     n = int(len(samples) * LISTENER_RATE / SAMPLE_RATE)
@@ -935,7 +950,13 @@ def _stray(engine: Engine, samples: np.ndarray, text: str) -> float:
         result = model.generate(mx.array(heard))
     except Exception as e:  # a line is better unchecked than not made
         print(f"[designed] the listener failed: {e!r}", flush=True)
-        return 0.0
+        return 0.0, []
+    return _stray(samples, text, result), _wrong_words(text, result.text)
+
+
+def _stray(samples: np.ndarray, text: str, result) -> float:
+    """Seconds of sound before the first word the listener heard, or after the last; 0 when there's
+    nothing to go by: it heard fewer words than `text` has."""
     if len(result.text.split()) < len(re.findall(r"[\w’']+", text)):
         return 0.0  # it missed a word ("Busy!"), which may be the sound it didn't place
     words = [t for sentence in result.sentences for t in sentence.tokens if t.text.strip()]
@@ -943,6 +964,52 @@ def _stray(engine: Engine, samples: np.ndarray, text: str) -> float:
         return 0.0
     start, end = _sound_span(samples)
     return max(0.0, words[0].start - start - STRAY_BEFORE) + max(0.0, end - words[-1].end - STRAY_AFTER)
+
+
+_dictionary: set[str] | None = None
+SAME_SPELLING = 0.7  # what's heard this alike in its letters is the same word, spelled the listener's way
+
+
+def _known(word: str) -> bool:
+    """An ordinary English word, which the listener can be trusted to hear (it hears names and the
+    book's respellings, "Yooay", as whatever they sound like: "you always")."""
+    global _dictionary
+    if _dictionary is None:
+        try:
+            _dictionary = {w.strip().lower() for w in open("/usr/share/dict/words", encoding="utf-8")} | {"a", "i"}
+        except OSError:  # no word list here: lower-case words in the text are taken as ordinary ones
+            _dictionary = set()
+    return not _dictionary or word.split("'")[0] in _dictionary
+
+
+def _wrong_words(text: str, heard: str) -> list[tuple[int, str]]:
+    """The words of `text` the voice said wrong or left out, and those it added, as (place in the
+    text, what was heard). Only ordinary words in lower case count: "a time to hate" heard as "a time
+    and a hate" is ("to", "and a")."""
+    def words(t: str) -> list[str]:
+        return re.findall(r"[^\W\d_]+(?:'[^\W\d_]+)?", t.replace("’", "'"))
+
+    def letters(ws: list[str]) -> str:
+        return "".join(re.sub(r"'s$", "", w) for w in ws)
+
+    said, got = words(text), [w.lower() for w in words(heard)]
+    plain = [w.lower() for w in said]
+    wrong = []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, plain, got, autojunk=False).get_opcodes():
+        if op == "equal":
+            continue
+        if op == "insert":
+            if all(_known(w) for w in got[j1:j2]):
+                wrong.append((i1, " ".join(got[j1:j2])))
+            continue
+        # A name among them throws the words around it out of line, and a near spelling is the
+        # listener's ("Be hush" as "behush", "surgeon's" as "surgeon", "ducal" as "dukeal").
+        if not all(said[i].islower() and _known(plain[i]) for i in range(i1, i2)):
+            continue
+        if op == "replace" and difflib.SequenceMatcher(None, letters(plain[i1:i2]), letters(got[j1:j2])).ratio() >= SAME_SPELLING:
+            continue
+        wrong += [(i, " ".join(got[j1:j2])) for i in range(i1, i2)]
+    return wrong
 
 
 def intonation(text: str) -> str:
@@ -969,9 +1036,9 @@ def _ending(samples: np.ndarray) -> float:
     return float(db[speech[-1]]) if len(speech) else -100.0
 
 
-def _end_rise(samples: np.ndarray) -> float:
-    """The pitch of a line's last 200 ms of voice over that of the 600 ms before (1 = level). A jump to
-    double or half between neighbouring frames is the pitch finder slipping an octave, and is folded back."""
+def _pitch_track(samples: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The voice's pitch every 20 ms where it's voiced: (frame numbers, Hz). A jump to double or half
+    between neighbouring frames is the pitch finder slipping an octave, and is folded back."""
     hop = SAMPLE_RATE // 50
     times, pitches = [], []
     for i in range(0, len(samples) - 2048, hop):
@@ -985,11 +1052,24 @@ def _end_rise(samples: np.ndarray) -> float:
                 p *= 2
         times.append(i // hop)
         pitches.append(p)
-    if len(pitches) < 10:
+    return np.array(times), np.array(pitches)
+
+
+def _end_rise(samples: np.ndarray) -> float:
+    """The pitch of a line's last 200 ms of voice over that of the 600 ms before (1 = level)."""
+    t, p = _pitch_track(samples)
+    if len(p) < 10:
         return 1.0
-    t, p = np.array(times), np.array(pitches)
     last, before = p[t > t[-1] - 10], p[(t <= t[-1] - 10) & (t > t[-1] - 40)]
     return float(np.median(last) / np.median(before)) if len(before) >= 5 else 1.0
+
+
+def _tail_lift(samples: np.ndarray) -> float:
+    """The pitch of a line's last 800 ms of voice over that of the whole line (1 = level)."""
+    t, p = _pitch_track(samples)
+    if len(p) < 10:
+        return 1.0
+    return float(np.median(p[t > t[-1] - 40]) / np.median(p))
 
 
 # "…" written as ". . ." stops the voice skipping the pause (a third of readings had none); it still
@@ -998,6 +1078,16 @@ def _end_rise(samples: np.ndarray) -> float:
 DOTS = re.compile(r"(?:\s*(?:…|\.\s?\.\s?\.)\.?\s*)+")
 DASHES = re.compile(r"\s*(?:—|―|-{2,})\s*|\s+–\s+")  # a long dash stops the voice the same way; not "1914–1918"
 SPACED_DOTS = ". . ."
+# A dash before the last word or two of a line ("the familiar scrawl—Yueh’s.") reads as a comma: after
+# a pause, so little is said loud and high, like a shout (3 takes in 6 of that line; with a comma, none).
+SHORT_ENDING = re.compile(rf"(?:{DASHES.pattern})(?=(?:[\w’'-]+\s+)?[\w’'-]+[.!]?[{re.escape(CLOSERS)}]*\s*$)")
+
+
+def dash_pauses(text: str) -> str:
+    """`text` with its long dashes written as the pause the voice makes at "…" (see DOTS), or as a comma
+    before a short ending (see SHORT_ENDING)."""
+    text = SHORT_ENDING.sub(lambda m: ", " if text[:m.start()].strip() else m.group(0), text)
+    return DASHES.sub("…", text)
 DOTS_PAUSE, DOTS_TAIL = 0.65, 0.45  # seconds at dots in a line, and after dots ending one
 DOTS_MIN_GAP = 0.16  # seconds; anything shorter can be a silence inside a word
 PAUSES_VERSION = 2  # in the name of the audio of lines with dots: bump to make only those again

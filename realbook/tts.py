@@ -75,7 +75,7 @@ def _resolve(text: str, voice: str, style: str) -> tuple[str, str, str]:
     if not (designed.supports(voice, style) or (style == "quiet" and voice.startswith("kokoro:"))):
         style = ""  # same audio as usual, so the same cached file
     if designed.engine_of(voice):
-        return designed.spaced_dots(_clean(designed.DASHES.sub("…", text))), voice, style
+        return designed.spaced_dots(_clean(designed.dash_pauses(text))), voice, style
     return _clean(text), voice, style
 
 
